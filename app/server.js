@@ -26,7 +26,7 @@ function loadConfig() {
       mediaDir: join(__dirname, 'media'),
       // Secrets are NOT stored here — see secrets.json (generated at deploy time).
       // Tarball the in-app "Update" button pulls from. Override per fork.
-      updateUrl: 'https://raw.githubusercontent.com/thakursat/hosted-video-streamer/main/streamvault-app.tar.gz'
+      updateUrl: 'https://raw.githubusercontent.com/thakursat/hosted-video-streamer/refs/heads/main/streamvault-app.tar.gz'
     };
     fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2));
     console.log('\n  Created config.json — open the app to create your account.\n');
@@ -892,8 +892,18 @@ app.post('/api/download/:id/dismiss', requireAuth, (req, res) => {
 // yt-dlp, and restart. Runs as the unprivileged service user, so it can't call
 // systemctl; it exits non-zero and relies on the unit's `Restart=on-failure`.
 // ---------------------------------------------------------------------------
-const UPDATE_URL = process.env.SV_UPDATE_URL || config.updateUrl ||
-  'https://raw.githubusercontent.com/thakursat/hosted-video-streamer/main/streamvault-app.tar.gz';
+// GitHub's CDN now 400s the short raw form (raw.githubusercontent.com/o/r/main/…);
+// the canonical refs/heads/<branch> form works. Rewrite branch refs (leave SHAs).
+function normalizeUpdateUrl(u) {
+  try {
+    return String(u).replace(
+      /(https:\/\/raw\.githubusercontent\.com\/[^/]+\/[^/]+\/)(?!refs\/)([^/]+)(\/)/,
+      (m, pre, ref, post) => /^[0-9a-f]{40}$/i.test(ref) ? m : `${pre}refs/heads/${ref}${post}`
+    );
+  } catch { return u; }
+}
+const UPDATE_URL = normalizeUpdateUrl(process.env.SV_UPDATE_URL || config.updateUrl ||
+  'https://raw.githubusercontent.com/thakursat/hosted-video-streamer/refs/heads/main/streamvault-app.tar.gz');
 
 const update = { status: 'idle', log: [] };
 function ulog(line) {

@@ -94,7 +94,7 @@ Supported containers: mp4, mkv, webm, mov, avi, m4v, ts, m2ts, 3gp, ogv, and mor
   "email": "",
   "passwordHash": "",
   "mediaDir": "/absolute/path/to/media",
-  "updateUrl": "https://raw.githubusercontent.com/thakursat/hosted-video-streamer/main/streamvault-app.tar.gz"
+  "updateUrl": "https://raw.githubusercontent.com/thakursat/hosted-video-streamer/refs/heads/main/streamvault-app.tar.gz"
 }
 ```
 

@@ -5,7 +5,7 @@
 # StreamVault, and starts it as a systemd service.
 #
 # Usage (run in the Proxmox VE host shell):
-#   bash -c "$(curl -fsSL https://raw.githubusercontent.com/thakursat/hosted-video-streamer/main/streamvault.sh)"
+#   bash -c "$(curl -fsSL https://raw.githubusercontent.com/thakursat/hosted-video-streamer/refs/heads/main/streamvault.sh)"
 #
 # Defaults: 2 vCPU, 8 GB RAM, 200 GB disk, unprivileged, DHCP.
 # Override any default by exporting a var before running, e.g.:
@@ -14,7 +14,7 @@
 set -euo pipefail
 
 # ---- EDIT THIS after you push to GitHub -----------------------------------
-REPO_RAW="${REPO_RAW:-https://raw.githubusercontent.com/thakursat/hosted-video-streamer/main}"
+REPO_RAW="${REPO_RAW:-https://raw.githubusercontent.com/thakursat/hosted-video-streamer/refs/heads/main}"
 APP_ARCHIVE_URL="${APP_ARCHIVE_URL:-$REPO_RAW/streamvault-app.tar.gz}"
 # ---------------------------------------------------------------------------
 

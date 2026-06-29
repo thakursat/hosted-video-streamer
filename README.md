@@ -12,7 +12,7 @@ show a live progress bar and are saved under randomized names.
 Run this in the **Proxmox VE host shell** (Datacenter → your node → Shell):
 
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/thakursat/hosted-video-streamer/main/streamvault.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/thakursat/hosted-video-streamer/refs/heads/main/streamvault.sh)"
 ```
 
 > The script pulls the app from `streamvault-app.tar.gz` in this repo via the
@@ -45,7 +45,7 @@ Export variables before running the one-liner:
 
 ```bash
 CT_RAM=4096 CT_DISK=100 CT_HOSTNAME=media \
-  bash -c "$(curl -fsSL https://raw.githubusercontent.com/thakursat/hosted-video-streamer/main/streamvault.sh)"
+  bash -c "$(curl -fsSL https://raw.githubusercontent.com/thakursat/hosted-video-streamer/refs/heads/main/streamvault.sh)"
 ```
 
 Available overrides: `CT_ID`, `CT_HOSTNAME`, `CT_CPU`, `CT_RAM` (MB), `CT_DISK`
@@ -64,7 +64,7 @@ Available overrides: `CT_ID`, `CT_HOSTNAME`, `CT_CPU`, `CT_RAM` (MB), `CT_DISK`
 ## Updating
 
 ```bash
-pct exec <CTID> -- bash -c "curl -fsSL https://raw.githubusercontent.com/thakursat/hosted-video-streamer/main/streamvault-app.tar.gz -o /tmp/sv.tar.gz && tar -xzf /tmp/sv.tar.gz -C /opt/streamvault && cd /opt/streamvault && npm install --omit=dev && chown -R streamvault:streamvault /opt/streamvault && systemctl restart streamvault"
+pct exec <CTID> -- bash -c "curl -fsSL https://raw.githubusercontent.com/thakursat/hosted-video-streamer/refs/heads/main/streamvault-app.tar.gz -o /tmp/sv.tar.gz && tar -xzf /tmp/sv.tar.gz -C /opt/streamvault && cd /opt/streamvault && npm install --omit=dev && chown -R streamvault:streamvault /opt/streamvault && systemctl restart streamvault"
 ```
 
 (Your `config.json` and `media/` are preserved.)
