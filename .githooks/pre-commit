@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -e
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+APP_DIR="$REPO_ROOT/app"
+
+# Bump patch version in package.json + package-lock.json
+cd "$APP_DIR"
+npm version patch --no-git-tag-version > /dev/null
+
+NEW_VERSION=$(node -p "require('./package.json').version")
+
+# Rebuild the deployment archive with the new version
+cd "$REPO_ROOT"
+bash build-archive.sh > /dev/null
+
+# Stage the updated files so they're included in this commit
+git add \
+  "$APP_DIR/package.json" \
+  "$APP_DIR/package-lock.json" \
+  "$REPO_ROOT/streamvault-app.tar.gz"
+
+echo "▶ StreamVault bumped to v${NEW_VERSION} — archive rebuilt"
