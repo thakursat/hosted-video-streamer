@@ -77,6 +77,13 @@ have**. HLS/segmented streams are merged into a single mp4.
 > on the LXC). It's picked up automatically for every download and never
 > committed. Channel / model / pornstar pages are treated as playlists too.
 
+> **Blocked site / connection reset (`[Errno 104]`):** if a download fails with
+> a reset/refused connection, your network or ISP is likely blocking that site.
+> Route yt-dlp through a proxy or VPN: set **`SV_PROXY`** (or `"proxy"` in
+> `config.json`) to e.g. `http://host:port` or `socks5://127.0.0.1:1080`. For the
+> systemd service, add `Environment=SV_PROXY=…` to the unit (or a drop-in) and
+> restart. Every download and metadata probe then goes through it.
+
 Supported containers: mp4, mkv, webm, mov, avi, m4v, ts, m2ts, 3gp, ogv, and more.
 
 > **Browser playback note:** the server streams files directly (with HTTP range

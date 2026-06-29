@@ -24,6 +24,9 @@ function loadConfig() {
       email: '',
       passwordHash: '',
       mediaDir: join(__dirname, 'media'),
+      // Optional yt-dlp proxy (or set the SV_PROXY env var) to bypass network
+      // blocks — e.g. "http://host:port" or "socks5://127.0.0.1:1080". Empty = none.
+      proxy: '',
       // Secrets are NOT stored here — see secrets.json (generated at deploy time).
       // Tarball the in-app "Update" button pulls from. Override per fork.
       updateUrl: 'https://raw.githubusercontent.com/thakursat/hosted-video-streamer/refs/heads/main/streamvault-app.tar.gz'
@@ -54,7 +57,18 @@ const MEDIA_ROOT = resolve(config.mediaDir);
 // to reach playlists/age-restricted/members content (e.g. YouTube, which often
 // 403s playlist pages without a login). Passed to every yt-dlp invocation.
 const COOKIES_PATH = join(__dirname, 'cookies.txt');
-function ytCookies() { return fs.existsSync(COOKIES_PATH) ? ['--cookies', COOKIES_PATH] : []; }
+// Optional proxy/VPN for yt-dlp — set SV_PROXY (or config.proxy) to bypass
+// ISP/network blocks (e.g. a reset connection / [Errno 104] to some sites).
+// Examples: http://user:pass@host:port, socks5://127.0.0.1:1080
+const PROXY = process.env.SV_PROXY || config.proxy || '';
+// Common network flags applied to every yt-dlp call: cookies, proxy, retries.
+function ytNet() {
+  const a = [];
+  if (fs.existsSync(COOKIES_PATH)) a.push('--cookies', COOKIES_PATH);
+  if (PROXY) a.push('--proxy', PROXY);
+  a.push('--retries', '5', '--fragment-retries', '10', '--socket-timeout', '30');
+  return a;
+}
 
 function safePath(rel) {
   const abs = resolve(MEDIA_ROOT, String(rel || '').replace(/^[/\\]+/, ''));
@@ -357,7 +371,7 @@ function jobView(job) {
 // Flat playlist probe — title + entry count, no per-video metadata.
 function fetchPlaylistMeta(url) {
   return new Promise((resolve) => {
-    execFile('yt-dlp', ['-J', '--flat-playlist', '--yes-playlist', '--no-warnings', '--no-progress', ...ytCookies(), url],
+    execFile('yt-dlp', ['-J', '--flat-playlist', '--yes-playlist', '--no-warnings', '--no-progress', ...ytNet(), url],
       { maxBuffer: 64 * 1024 * 1024, timeout: 45000 }, (err, stdout) => {
         if (err) return resolve(null);
         try {
@@ -379,7 +393,7 @@ function emit(jobId) {
 // Lightweight metadata probe (title, thumbnail, duration) — no download.
 function fetchMeta(url) {
   return new Promise((resolve) => {
-    execFile('yt-dlp', ['-J', '--no-playlist', '--no-warnings', '--no-progress', ...ytCookies(), url],
+    execFile('yt-dlp', ['-J', '--no-playlist', '--no-warnings', '--no-progress', ...ytNet(), url],
       { maxBuffer: 32 * 1024 * 1024, timeout: 30000 }, (err, stdout) => {
         if (err) return resolve(null);
         try {
@@ -446,7 +460,7 @@ function startDownload(url, { folder = '', playlist = false } = {}) {
     '--newline', '--no-mtime', '--no-warnings',
     '--ignore-errors',                  // one bad playlist item shouldn't abort the rest
     '--download-archive', archive,      // skip items already pulled into this folder
-    ...ytCookies(),
+    ...ytNet(),
     playlist ? '--yes-playlist' : '--no-playlist',
     '-o', outTemplate,
     '--merge-output-format', 'mp4',
