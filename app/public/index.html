@@ -410,6 +410,11 @@
     <div class="actions">
       <span class="count" id="count"></span>
       <button class="btn btn-primary" id="addVideos">+ Add videos</button>
+      <span id="ytdlpNav" style="display:none;align-items:center;gap:5px;font-size:.72rem;white-space:nowrap">
+        <span id="ytdlpNavDot" style="width:7px;height:7px;border-radius:50%;flex-shrink:0"></span>
+        <span id="ytdlpNavText" style="color:var(--muted)"></span>
+        <button id="ytdlpNavBtn" style="display:none;background:rgba(245,197,66,.14);border:1px solid rgba(245,197,66,.35);color:#f5c542;border-radius:4px;padding:2px 8px;font-size:.68rem;cursor:pointer;font-family:inherit;line-height:1.6">Update</button>
+      </span>
       <button class="btn hbtn" id="stats" title="Server stats">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>
       </button>
@@ -427,12 +432,7 @@
       </button>
     </div>
   </header>
-  <div id="ytdlpBanner" style="display:none;background:rgba(245,197,66,.1);border-bottom:1px solid rgba(245,197,66,.22);padding:7px 20px;align-items:center;gap:12px;font-size:.82rem">
-    <svg viewBox="0 0 24 24" fill="none" stroke="#f5c542" stroke-width="2" style="width:15px;height:15px;flex-shrink:0"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
-    <span id="ytdlpMsg" style="flex:1"></span>
-    <button class="btn" id="ytdlpUpdateBtn" style="padding:4px 12px;font-size:.76rem">Update now</button>
-    <button id="ytdlpDismiss" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:1.1rem;padding:0 4px;line-height:1">&times;</button>
-  </div>
+
 
   <!-- Add videos modal + minimised dock -->
   <div class="dl-backdrop" id="dlBackdrop"></div>
@@ -1587,40 +1587,58 @@ window.addEventListener('keydown', e => {
   if (statsModal.classList.contains('open')) closeStats();
 });
 
-// ---- yt-dlp version check ----
+// ---- yt-dlp navbar indicator ----
+const ytdlpNav = document.getElementById('ytdlpNav');
+const ytdlpNavDot = document.getElementById('ytdlpNavDot');
+const ytdlpNavText = document.getElementById('ytdlpNavText');
+const ytdlpNavBtn = document.getElementById('ytdlpNavBtn');
+
 async function checkYtDlp() {
   try {
     const r = await fetch('/api/ytdlp/version');
     if (!r.ok) return;
     const d = await r.json();
-    if (!d.outdated) return;
-    document.getElementById('ytdlpMsg').textContent =
-      'yt-dlp ' + d.current + ' is outdated (latest: ' + d.latest + ') — downloads may fail on recently changed sites.';
-    document.getElementById('ytdlpBanner').style.display = 'flex';
+    if (!d.current) return;
+    ytdlpNav.style.display = 'flex';
+    if (d.outdated) {
+      ytdlpNavDot.style.background = '#f5c542';
+      ytdlpNavText.style.color = '#f5c542';
+      ytdlpNavText.textContent = 'yt-dlp ' + d.current + ' → ' + d.latest;
+      ytdlpNavBtn.style.display = '';
+      ytdlpNavBtn.textContent = 'Update';
+      ytdlpNavBtn.disabled = false;
+    } else {
+      ytdlpNavDot.style.background = '#4caf50';
+      ytdlpNavText.style.color = 'var(--muted)';
+      ytdlpNavText.textContent = 'yt-dlp ' + d.current + ' ✓';
+      ytdlpNavBtn.style.display = 'none';
+    }
   } catch {}
 }
 checkYtDlp();
-document.getElementById('ytdlpUpdateBtn').addEventListener('click', async () => {
-  const btn = document.getElementById('ytdlpUpdateBtn');
-  const msg = document.getElementById('ytdlpMsg');
-  btn.disabled = true; btn.textContent = 'Updating…';
+
+ytdlpNavBtn.addEventListener('click', async () => {
+  ytdlpNavBtn.disabled = true;
+  ytdlpNavBtn.textContent = 'Updating…';
+  ytdlpNavText.textContent = 'yt-dlp updating…';
   try {
     const r = await fetch('/api/ytdlp/update', { method: 'POST' });
     const d = await r.json().catch(() => ({}));
     if (r.ok) {
-      msg.textContent = 'yt-dlp updated — retry your downloads now.';
-      btn.style.display = 'none';
+      ytdlpNavText.textContent = 'yt-dlp updated ✓';
+      ytdlpNavDot.style.background = '#4caf50';
+      ytdlpNavText.style.color = 'var(--muted)';
+      ytdlpNavBtn.style.display = 'none';
+      setTimeout(checkYtDlp, 800);
     } else {
-      msg.textContent = 'Update failed: ' + (d.error || 'unknown error');
-      btn.disabled = false; btn.textContent = 'Retry';
+      ytdlpNavText.style.color = '#e57373';
+      ytdlpNavText.textContent = 'Update failed: ' + (d.error || 'unknown error');
+      ytdlpNavBtn.disabled = false; ytdlpNavBtn.textContent = 'Retry';
     }
   } catch {
-    msg.textContent = 'Update failed (network error).';
-    btn.disabled = false; btn.textContent = 'Retry';
+    ytdlpNavText.textContent = 'Update failed (network error)';
+    ytdlpNavBtn.disabled = false; ytdlpNavBtn.textContent = 'Retry';
   }
-});
-document.getElementById('ytdlpDismiss').addEventListener('click', () => {
-  document.getElementById('ytdlpBanner').style.display = 'none';
 });
 
 load();
