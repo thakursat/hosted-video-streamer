@@ -11,16 +11,7 @@ export function ytDlpBin(): string {
   return fs.existsSync(YT_DLP_LOCAL) ? YT_DLP_LOCAL : 'yt-dlp';
 }
 
-// Rewrite URLs where the TLD or subdomain doesn't match yt-dlp's extractor.
-const URL_REWRITES: [RegExp, string][] = [
-  [/^(https?:\/\/(?:www\.)?pornhub)\.(org|net|info)(\/.*)?$/i, '$1.com$3'],
-];
-
 export function normalizeUrl(url: string): string {
-  for (const [pattern, replacement] of URL_REWRITES) {
-    const rewritten = url.replace(pattern, replacement);
-    if (rewritten !== url) return rewritten;
-  }
   return url;
 }
 
@@ -42,7 +33,18 @@ export function ytNetArgs(): string[] {
   const ua = BROWSER_UAS[_uaIdx++ % BROWSER_UAS.length];
   args.push(
     '--user-agent', ua,
+    '--add-header', 'Accept:text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
     '--add-header', 'Accept-Language:en-US,en;q=0.9',
+    '--add-header', 'Accept-Encoding:gzip, deflate, br',
+    '--add-header', 'Upgrade-Insecure-Requests:1',
+    '--add-header', 'Sec-Fetch-Site:none',
+    '--add-header', 'Sec-Fetch-Mode:navigate',
+    '--add-header', 'Sec-Fetch-User:?1',
+    '--add-header', 'Sec-Fetch-Dest:document',
+    '--add-header', 'Sec-Ch-Ua:"Chromium";v="125", "Not.A/Brand";v="24"',
+    '--add-header', 'Sec-Ch-Ua-Mobile:?0',
+    '--add-header', 'Sec-Ch-Ua-Platform:"Windows"',
+    '--add-header', 'Cache-Control:max-age=0',
     '--force-ipv4',
     '--geo-bypass',
     '--retries', '10',
@@ -65,7 +67,7 @@ function decodeHtml(s: string): string {
 
 export function netHint(msg: string): string {
   if (/HTTP Error 410|410.*Gone/i.test(msg))
-    return msg + ' — Video removed (410 Gone). If many fail, update yt-dlp via the navbar button.';
+    return msg + ' — Site rejected the request (410). Try updating yt-dlp via the navbar button.';
   if (/sign.?in|log.?in required|age.?verif|members.?only|premium|private|not available|account required/i.test(msg))
     return msg + ' — Authentication required. Drop a cookies.txt (Netscape format) next to server.js and retry.';
   if (/reset by peer|errno 104|connection refused|timed out|network is unreachable|getaddrinfo|failed to resolve/i.test(msg))
