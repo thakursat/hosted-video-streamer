@@ -16,36 +16,17 @@ export function normalizeUrl(url: string): string {
   return url;
 }
 
-// Rotate real browser UAs so yt-dlp requests look like a normal browser.
-const BROWSER_UAS = [
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0',
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15',
-];
-let _uaIdx = 0;
 
 export function ytNetArgs(): string[] {
   const args: string[] = [];
   if (fs.existsSync(COOKIES_PATH)) args.push('--cookies', COOKIES_PATH);
   const proxy = getProxy();
   if (proxy) args.push('--proxy', proxy);
-  const ua = BROWSER_UAS[_uaIdx++ % BROWSER_UAS.length];
   args.push(
-    '--user-agent', ua,
-    '--add-header', 'Accept:text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+    // Impersonate Chrome at the TLS + HTTP level — fixes connection-reset-by-peer
+    // on sites that fingerprint the TLS handshake (requires curl-cffi on server).
+    '--impersonate', 'chrome',
     '--add-header', 'Accept-Language:en-US,en;q=0.9',
-    '--add-header', 'Accept-Encoding:gzip, deflate, br',
-    '--add-header', 'Upgrade-Insecure-Requests:1',
-    '--add-header', 'Sec-Fetch-Site:none',
-    '--add-header', 'Sec-Fetch-Mode:navigate',
-    '--add-header', 'Sec-Fetch-User:?1',
-    '--add-header', 'Sec-Fetch-Dest:document',
-    '--add-header', 'Sec-Ch-Ua:"Chromium";v="125", "Not.A/Brand";v="24"',
-    '--add-header', 'Sec-Ch-Ua-Mobile:?0',
-    '--add-header', 'Sec-Ch-Ua-Platform:"Windows"',
-    '--add-header', 'Cache-Control:max-age=0',
     '--force-ipv4',
     '--geo-bypass',
     '--retries', '10',

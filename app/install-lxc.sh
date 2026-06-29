@@ -90,10 +90,15 @@ step "Updating apt package lists..."
 apt-get update -y 2>&1 | grep -E "^(Get|Hit|Ign|Err)" | head -20 || true
 ok "Package lists updated"
 
-step "Installing system packages: curl, ca-certificates, rsync, ffmpeg, python3, unzip, chromium..."
+step "Installing system packages: curl, ca-certificates, rsync, ffmpeg, python3, pip, unzip, chromium..."
 DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-  curl ca-certificates rsync ffmpeg python3 unzip chromium 2>&1
+  curl ca-certificates rsync ffmpeg python3 python3-pip unzip chromium 2>&1
 ok "System packages installed"
+
+step "Installing curl-cffi (yt-dlp TLS impersonation)..."
+pip3 install -q --break-system-packages curl-cffi 2>&1 || \
+  pip3 install -q curl-cffi 2>&1 || true
+ok "curl-cffi installed"
 
 # ── Step 2: Node.js ───────────────────────────────────────────────────────────
 

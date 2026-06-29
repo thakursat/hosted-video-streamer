@@ -67,6 +67,19 @@ router.get('/app/update/stream', requireAuth, async (req, res) => {
       log(`  (skipped — sudo not available, Chromium may already be installed)`);
     }
 
+    log(`► Ensuring curl-cffi is installed (yt-dlp TLS impersonation)...`);
+    try {
+      await runStep('pip3', ['install', '-q', '--break-system-packages', 'curl-cffi'], '/', res);
+      log(`✓ curl-cffi ready`);
+    } catch {
+      try {
+        await runStep('pip3', ['install', '-q', 'curl-cffi'], '/', res);
+        log(`✓ curl-cffi ready`);
+      } catch {
+        log(`  (skipped — curl-cffi install failed, --impersonate may not work)`);
+      }
+    }
+
     log(`► Installing server dependencies...`);
     await runStep('npm', ['install'], APP_DIR, res);
     log(`✓ Server deps installed`);
