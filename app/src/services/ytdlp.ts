@@ -11,12 +11,31 @@ export function ytDlpBin(): string {
   return fs.existsSync(YT_DLP_LOCAL) ? YT_DLP_LOCAL : 'yt-dlp';
 }
 
+// Rotate real browser UAs so yt-dlp requests look like a normal browser.
+const BROWSER_UAS = [
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15',
+];
+let _uaIdx = 0;
+
 export function ytNetArgs(): string[] {
   const args: string[] = [];
   if (fs.existsSync(COOKIES_PATH)) args.push('--cookies', COOKIES_PATH);
   const proxy = getProxy();
   if (proxy) args.push('--proxy', proxy);
-  args.push('--retries', '5', '--fragment-retries', '10', '--socket-timeout', '30');
+  const ua = BROWSER_UAS[_uaIdx++ % BROWSER_UAS.length];
+  args.push(
+    '--user-agent', ua,
+    '--add-header', 'Accept-Language:en-US,en;q=0.9',
+    '--retries', '5',
+    '--fragment-retries', '10',
+    '--socket-timeout', '30',
+    '--extractor-retries', '3',
+    '--sleep-requests', '1',
+  );
   return args;
 }
 

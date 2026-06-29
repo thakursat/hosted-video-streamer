@@ -11,14 +11,34 @@ import type { BatchJob, BatchItem } from '../types';
 const router = Router();
 const batches = new Map<string, BatchJob>();
 
-function broadcastBatch(b: BatchJob, event = 'update'): void {
-  const subs = b._subs || new Set();
-  const payload = JSON.stringify({
+const DEFAULT_CONCURRENCY = 2;
+const MAX_CONCURRENCY = 3;
+// Stagger download starts to avoid triggering rate limits.
+const STAGGER_MIN_MS = 2000;
+const STAGGER_MAX_MS = 5000;
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(r => setTimeout(r, ms));
+}
+
+function serializeBatch(b: BatchJob) {
+  return {
     id: b.id, title: b.title, status: b.status, paused: b.paused,
-    done: b.done, total: b.total, items: b.items,
-  });
-  for (const res of subs) {
-    try { res.write(`event: ${event}\ndata: ${payload}\n\n`); } catch {}
+    done: b.done, total: b.total, concurrency: b.concurrency,
+    items: b.items.map(i => ({
+      index: i.index, title: i.title, thumbnail: i.thumbnail,
+      status: i.status, progress: i.progress,
+      speed: i.speed, eta: i.eta, error: i.error,
+    })),
+  };
+}
+
+function broadcastBatch(b: BatchJob): void {
+  const payload = JSON.stringify(serializeBatch(b));
+  for (const res of b._subs || new Set<Response>()) {
+    try { res.write(`event: update\ndata: ${payload}\n\n`); } catch {}
   }
 }
 
@@ -29,85 +49,122 @@ function sseHeaders(res: Response): void {
   res.flushHeaders();
 }
 
+// ── Concurrent batch runner ───────────────────────────────────────────────────
+
 async function runBatch(b: BatchJob): Promise<void> {
+  b._procs = new Map();
+  b._lastStartMs = 0;
+
   const destAbs = b.folder ? (safePath(b.folder) || getMediaRoot()) : getMediaRoot();
+  fs.mkdirSync(destAbs, { recursive: true });
 
-  for (const item of b.items) {
-    if (b._stopReq) { b.status = 'stopped'; break; }
-    if (item.status !== 'pending') continue;
-
-    while (b.paused && !b._stopReq) {
-      await new Promise(r => setTimeout(r, 300));
+  async function worker(workerIdx: number): Promise<void> {
+    // Stagger worker startups so downloads don't all begin at the same moment.
+    if (workerIdx > 0) {
+      await sleep(workerIdx * (STAGGER_MIN_MS + Math.random() * (STAGGER_MAX_MS - STAGGER_MIN_MS)));
     }
-    if (b._stopReq) { b.status = 'stopped'; break; }
 
-    item.status = 'downloading';
-    item.progress = 0;
-    broadcastBatch(b);
+    while (!b._stopReq) {
+      // Honour pause — let in-flight items finish, just don't start new ones.
+      while (b.paused && !b._stopReq) await sleep(300);
+      if (b._stopReq) break;
 
-    const isDirectUrl = !!item.url;
-    const src = isDirectUrl ? [item.url!] : [b.url, '--playlist-items', String(item.index)];
-    const outTpl = path.join(destAbs, '%(title).200B [%(id)s].%(ext)s');
+      // Claim the next pending item. JS is single-threaded: no races here.
+      const item = b.items.find(i => i.status === 'pending');
+      if (!item) break;
+      item.status = 'downloading';
+      item.progress = 0;
+      delete item.speed; delete item.eta; delete item.error;
 
-    const args = [
-      '--newline', '--no-mtime', '--no-warnings', '--continue',
-      ...(!isDirectUrl ? ['--ignore-errors'] : []),
-      '--download-archive', b.archive,
-      ...ytNetArgs(),
-      isDirectUrl ? '--no-playlist' : '--yes-playlist',
-      '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best',
-      '--merge-output-format', 'mp4',
-      '-o', outTpl,
-      ...src,
-    ];
+      // Inter-download jitter after the first item.
+      if (b._lastStartMs! > 0) {
+        const gap = STAGGER_MIN_MS + Math.random() * (STAGGER_MAX_MS - STAGGER_MIN_MS);
+        const waited = Date.now() - b._lastStartMs!;
+        if (waited < gap) await sleep(gap - waited);
+      }
+      if (b._stopReq) { item.status = 'pending'; break; }
+      // Another worker or cancel endpoint may have flipped status while we slept.
+      if ((item.status as string) === 'skipped') continue;
 
-    await new Promise<void>(resolve => {
-      const proc = spawnDownload(args);
-      b._proc = proc;
+      b._lastStartMs = Date.now();
+      broadcastBatch(b);
 
-      proc.stdout.on('data', (chunk: Buffer) => {
-        const lines = chunk.toString().split('\n');
-        for (const line of lines) {
-          const pctM = line.match(/(\d+\.?\d*)%/);
-          if (pctM) { item.progress = parseFloat(pctM[1]); broadcastBatch(b); }
-        }
+      const isDirectUrl = !!item.url;
+      const outTpl = path.join(destAbs, '%(title).200B [%(id)s].%(ext)s');
+
+      const args = [
+        '--newline', '--no-mtime', '--no-warnings', '--continue',
+        '--ignore-errors',
+        '--download-archive', b.archive,
+        ...ytNetArgs(),
+        isDirectUrl ? '--no-playlist' : '--yes-playlist',
+        ...(isDirectUrl ? [] : ['--playlist-items', String(item.index)]),
+        '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best',
+        '--merge-output-format', 'mp4',
+        '-o', outTpl,
+        isDirectUrl ? item.url! : b.url,
+      ];
+
+      await new Promise<void>(resolve => {
+        const proc = spawnDownload(args);
+        b._procs!.set(item.index, proc);
+
+        proc.stdout.on('data', (chunk: Buffer) => {
+          for (const line of chunk.toString().split('\n')) {
+            if (!line.trim()) continue;
+            const pct = line.match(/(\d+\.?\d*)%/);
+            if (pct) item.progress = parseFloat(pct[1]);
+            const spd = line.match(/at\s+([\d.]+\s*\w+\/s)/);
+            if (spd) item.speed = spd[1].trim();
+            const eta = line.match(/ETA\s+(\S+)/);
+            if (eta) item.eta = eta[1];
+          }
+          broadcastBatch(b);
+        });
+
+        proc.stderr.on('data', (chunk: Buffer) => {
+          const text = chunk.toString();
+          const errLine = text.trim().split('\n').find(l => /ERROR/i.test(l));
+          if (errLine) item.error = netHint(errLine);
+        });
+
+        proc.on('close', (code) => {
+          b._procs!.delete(item.index);
+          if (item.status !== 'skipped') {
+            const ok = code === 0 && !item.error;
+            item.status = ok ? 'done' : 'error';
+            if (!ok && !item.error) item.error = `yt-dlp exited with code ${code}`;
+            if (ok) item.progress = 100;
+          }
+          delete item.speed; delete item.eta;
+          b.done = b.items.filter(i => i.status === 'done').length;
+          broadcastBatch(b);
+          resolve();
+        });
       });
-
-      proc.stderr.on('data', (chunk: Buffer) => {
-        const text = chunk.toString();
-        if (text.includes('ERROR')) item.error = netHint(text.trim().split('\n')[0]);
-      });
-
-      proc.on('close', (code) => {
-        b._proc = undefined;
-        if (code === 0 || (code !== null && isDirectUrl === false)) {
-          item.status = item.error ? 'error' : 'done';
-        } else {
-          item.status = 'error';
-          item.error = item.error || `Exited with code ${code}`;
-        }
-        item.progress = 100;
-        b.done = b.items.filter(i => i.status === 'done').length;
-        broadcastBatch(b);
-        resolve();
-      });
-    });
+    }
   }
 
+  const concurrency = Math.min(b.concurrency, b.items.length, MAX_CONCURRENCY);
+  await Promise.all(Array.from({ length: concurrency }, (_, i) => worker(i)));
+
   if (b.status !== 'stopped') {
-    b.status = b.items.some(i => i.status === 'error') ? 'error' : 'done';
+    b.status = b._stopReq ? 'stopped'
+      : b.items.some(i => i.status === 'error') ? 'error'
+      : 'done';
   }
   broadcastBatch(b);
   rescan();
   buildMeta().catch(() => {});
 }
 
+// ── Routes ────────────────────────────────────────────────────────────────────
+
 router.post('/playlist/probe', requireAuth, async (req, res) => {
   const url = String(req.body?.url || '').trim();
   if (!url) { res.status(400).json({ error: 'url required' }); return; }
   try {
-    const result = await fetchPlaylistEntries(url);
-    res.json(result);
+    res.json(await fetchPlaylistEntries(url));
   } catch (err: any) {
     res.status(500).json({ error: netHint(err.message || 'Probe failed') });
   }
@@ -117,7 +174,12 @@ router.post('/playlist/download', requireAuth, (req, res) => {
   const url = String(req.body?.url || '').trim();
   const folder = String(req.body?.folder || '').replace(/^[/\\]+/, '');
   const title = String(req.body?.title || 'Playlist');
-  const rawItems: { index: number; title: string; url?: string }[] = req.body?.items || [];
+  const concurrency = Math.min(
+    Math.max(1, parseInt(String(req.body?.concurrency ?? DEFAULT_CONCURRENCY), 10) || DEFAULT_CONCURRENCY),
+    MAX_CONCURRENCY,
+  );
+  const rawItems: { index: number; title: string; url?: string; thumbnail?: string }[] =
+    req.body?.items || [];
 
   if (!url || !rawItems.length) {
     res.status(400).json({ error: 'url and items required' }); return;
@@ -130,7 +192,8 @@ router.post('/playlist/download', requireAuth, (req, res) => {
   const archive = path.join(destAbs, '.downloaded.txt');
 
   const items: BatchItem[] = rawItems.map(i => ({
-    index: i.index, title: i.title, url: i.url,
+    index: i.index, title: i.title,
+    url: i.url, thumbnail: i.thumbnail,
     status: 'pending', progress: 0,
   }));
 
@@ -138,7 +201,7 @@ router.post('/playlist/download', requireAuth, (req, res) => {
     id, url, title, folder, items,
     done: 0, total: items.length,
     status: 'running', paused: false,
-    startedAt: Date.now(), archive,
+    concurrency, startedAt: Date.now(), archive,
     _subs: new Set(),
   };
   batches.set(id, batch);
@@ -147,61 +210,73 @@ router.post('/playlist/download', requireAuth, (req, res) => {
 });
 
 router.get('/batch/:id/events', requireAuth, (req, res) => {
-  const b = batches.get(req.params["id"] as string);
+  const b = batches.get(req.params['id'] as string);
   sseHeaders(res);
   if (!b) { res.write('event: error\ndata: {"error":"Not found"}\n\n'); res.end(); return; }
   b._subs?.add(res);
-  res.write(`event: update\ndata: ${JSON.stringify({
-    id: b.id, title: b.title, status: b.status, paused: b.paused,
-    done: b.done, total: b.total, items: b.items,
-  })}\n\n`);
+  res.write(`event: update\ndata: ${JSON.stringify(serializeBatch(b))}\n\n`);
   req.on('close', () => b._subs?.delete(res));
 });
 
+// Returns full batch state (including items) for rehydrating after a page reload.
 router.get('/batches', requireAuth, (_req, res) => {
-  res.json([...batches.values()].map(b => ({
-    id: b.id, title: b.title, status: b.status, paused: b.paused,
-    done: b.done, total: b.total,
-  })));
+  res.json([...batches.values()].map(serializeBatch));
 });
 
 router.post('/batch/:id/pause', requireAuth, (req, res) => {
-  const b = batches.get(req.params["id"] as string);
+  const b = batches.get(req.params['id'] as string);
   if (!b) { res.status(404).json({ error: 'Not found' }); return; }
   b.paused = true;
-  b._proc?.kill('SIGTERM');
   broadcastBatch(b);
   res.json({ ok: true });
 });
 
 router.post('/batch/:id/resume', requireAuth, (req, res) => {
-  const b = batches.get(req.params["id"] as string);
+  const b = batches.get(req.params['id'] as string);
   if (!b) { res.status(404).json({ error: 'Not found' }); return; }
   b.paused = false;
-  if (b.status === 'paused') { b.status = 'running'; runBatch(b); }
+  if (b.status !== 'running') { b.status = 'running'; runBatch(b); }
   broadcastBatch(b);
   res.json({ ok: true });
 });
 
 router.post('/batch/:id/stop', requireAuth, (req, res) => {
-  const b = batches.get(req.params["id"] as string);
+  const b = batches.get(req.params['id'] as string);
   if (!b) { res.status(404).json({ error: 'Not found' }); return; }
   b._stopReq = true;
-  b._proc?.kill('SIGKILL');
+  b.status = 'stopped';
+  b._procs?.forEach(proc => {
+    try { proc.kill('SIGTERM'); } catch {}
+    setTimeout(() => { try { proc.kill('SIGKILL'); } catch {} }, 2000);
+  });
+  broadcastBatch(b);
   res.json({ ok: true });
 });
 
-router.post('/batch/:id/skip/:index', requireAuth, (req, res) => {
-  const b = batches.get(req.params["id"] as string);
+// Cancel a single item and let the worker move to the next one.
+router.post('/batch/:id/cancel/:index', requireAuth, (req, res) => {
+  const b = batches.get(req.params['id'] as string);
   if (!b) { res.status(404).json({ error: 'Not found' }); return; }
-  const idx = parseInt(req.params["index"] as string, 10);
+  const idx = parseInt(req.params['index'] as string, 10);
   const item = b.items.find(i => i.index === idx);
-  if (item) { item.status = 'skipped'; b._proc?.kill('SIGTERM'); }
+  if (!item) { res.status(404).json({ error: 'Item not found' }); return; }
+  if (!['pending', 'downloading'].includes(item.status)) {
+    res.status(400).json({ error: 'Item already finished' }); return;
+  }
+  item.status = 'skipped';
+  delete item.speed; delete item.eta;
+  const proc = b._procs?.get(idx);
+  if (proc) {
+    try { proc.kill('SIGTERM'); } catch {}
+    setTimeout(() => { try { proc.kill('SIGKILL'); } catch {} }, 2000);
+  }
+  b.done = b.items.filter(i => i.status === 'done').length;
+  broadcastBatch(b);
   res.json({ ok: true });
 });
 
 router.post('/batch/:id/dismiss', requireAuth, (req, res) => {
-  batches.delete(req.params["id"] as string);
+  batches.delete(req.params['id'] as string);
   res.json({ ok: true });
 });
 

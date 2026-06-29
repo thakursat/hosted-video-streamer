@@ -18,7 +18,8 @@ export const downloadsApi = {
     url: string;
     folder: string;
     title: string;
-    items: { index: number; title: string; url?: string }[];
+    concurrency?: number;
+    items: { index: number; title: string; url?: string; thumbnail?: string }[];
   }) => api.post<{ id: string }>('/playlist/download', payload).then(r => r.data),
 
   listBatches: () => api.get<BatchJob[]>('/batches').then(r => r.data),
@@ -29,8 +30,8 @@ export const downloadsApi = {
 
   stopBatch: (id: string) => api.post(`/batch/${id}/stop`).then(r => r.data),
 
-  skipBatchItem: (id: string, index: number) =>
-    api.post(`/batch/${id}/skip/${index}`).then(r => r.data),
+  cancelBatchItem: (id: string, index: number) =>
+    api.post(`/batch/${id}/cancel/${index}`).then(r => r.data),
 
   dismissBatch: (id: string) => api.post(`/batch/${id}/dismiss`).then(r => r.data),
 

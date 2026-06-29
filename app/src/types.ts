@@ -52,8 +52,11 @@ export interface BatchItem {
   index: number;
   title: string;
   url?: string;
+  thumbnail?: string;
   status: BatchItemStatus;
   progress: number;
+  speed?: string;
+  eta?: string;
   error?: string;
 }
 
@@ -67,11 +70,13 @@ export interface BatchJob {
   total: number;
   status: BatchStatus;
   paused: boolean;
+  concurrency: number;
   startedAt: number;
   archive: string;
-  _proc?: import('child_process').ChildProcess;
+  _procs?: Map<number, import('child_process').ChildProcess>;
   _subs?: Set<import('express').Response>;
   _stopReq?: boolean;
+  _lastStartMs?: number;
 }
 
 export interface PlaylistEntry {

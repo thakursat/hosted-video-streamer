@@ -41,8 +41,11 @@ export interface BatchItem {
   index: number;
   title: string;
   url?: string;
+  thumbnail?: string;
   status: BatchItemStatus;
   progress: number;
+  speed?: string;
+  eta?: string;
   error?: string;
 }
 
@@ -53,6 +56,7 @@ export interface BatchJob {
   paused: boolean;
   done: number;
   total: number;
+  concurrency: number;
   items: BatchItem[];
 }
 
