@@ -92,8 +92,7 @@ ok "Package lists updated"
 
 step "Installing system packages: curl, ca-certificates, rsync, ffmpeg, python3, unzip..."
 DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-  curl ca-certificates rsync ffmpeg python3 unzip 2>&1 \
-  | grep -E "^(Get:|Inst|Setting up|Processing)" || true
+  curl ca-certificates rsync ffmpeg python3 unzip 2>&1
 ok "System packages installed"
 
 # ── Step 2: Node.js ───────────────────────────────────────────────────────────
@@ -107,7 +106,8 @@ if command -v node >/dev/null 2>&1; then
   if [ "${MAJOR:-0}" -lt 18 ]; then
     info "Node.js $NODE_VER is too old (need 18+). Installing Node.js 20..."
     run_q "NodeSource setup" bash -c "curl -fsSL https://deb.nodesource.com/setup_20.x | bash -"
-    DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs 2>&1 | grep -E "^(Get:|Inst|Setting up)" || true
+    DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs 2>&1
+    hash -r 2>/dev/null || true
     ok "Node.js upgraded: $(node --version)"
   fi
 else
@@ -115,9 +115,10 @@ else
   echo "  Downloading NodeSource setup script..."
   curl -fsSL https://deb.nodesource.com/setup_20.x -o /tmp/nodesource_setup.sh
   echo "  Running NodeSource setup (adds apt repo)..."
-  bash /tmp/nodesource_setup.sh 2>&1 | grep -v "^$" | grep -v "^#" | tail -10
+  bash /tmp/nodesource_setup.sh 2>&1 | grep -v "^$"
   rm -f /tmp/nodesource_setup.sh
-  DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs 2>&1 | grep -E "^(Get:|Inst|Setting up)" || true
+  DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs 2>&1
+  hash -r 2>/dev/null || true
   ok "Node.js installed: $(node --version), npm: $(npm --version)"
 fi
 
@@ -292,7 +293,7 @@ UNIT
   info "streamvault.service not found in archive — wrote inline fallback"
 fi
 systemctl daemon-reload
-systemctl enable streamvault >/dev/null 2>&1
+systemctl enable streamvault
 ok "streamvault.service enabled"
 
 # Restart if already running (upgrade path).
