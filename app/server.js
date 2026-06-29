@@ -49,6 +49,13 @@ if (!fs.existsSync(THUMB_DIR)) fs.mkdirSync(THUMB_DIR, { recursive: true });
 // All file ops are confined to MEDIA_ROOT. safePath() maps a user-supplied
 // relative path to an absolute one and refuses anything that escapes the root.
 const MEDIA_ROOT = resolve(config.mediaDir);
+
+// Optional cookies for yt-dlp — drop a Netscape cookies.txt next to server.js
+// to reach playlists/age-restricted/members content (e.g. YouTube, which often
+// 403s playlist pages without a login). Passed to every yt-dlp invocation.
+const COOKIES_PATH = join(__dirname, 'cookies.txt');
+function ytCookies() { return fs.existsSync(COOKIES_PATH) ? ['--cookies', COOKIES_PATH] : []; }
+
 function safePath(rel) {
   const abs = resolve(MEDIA_ROOT, String(rel || '').replace(/^[/\\]+/, ''));
   if (abs !== MEDIA_ROOT && !abs.startsWith(MEDIA_ROOT + sep)) return null;
@@ -350,7 +357,7 @@ function jobView(job) {
 // Flat playlist probe — title + entry count, no per-video metadata.
 function fetchPlaylistMeta(url) {
   return new Promise((resolve) => {
-    execFile('yt-dlp', ['-J', '--flat-playlist', '--no-warnings', '--no-progress', url],
+    execFile('yt-dlp', ['-J', '--flat-playlist', '--yes-playlist', '--no-warnings', '--no-progress', ...ytCookies(), url],
       { maxBuffer: 64 * 1024 * 1024, timeout: 45000 }, (err, stdout) => {
         if (err) return resolve(null);
         try {
@@ -372,7 +379,7 @@ function emit(jobId) {
 // Lightweight metadata probe (title, thumbnail, duration) — no download.
 function fetchMeta(url) {
   return new Promise((resolve) => {
-    execFile('yt-dlp', ['-J', '--no-playlist', '--no-warnings', '--no-progress', url],
+    execFile('yt-dlp', ['-J', '--no-playlist', '--no-warnings', '--no-progress', ...ytCookies(), url],
       { maxBuffer: 32 * 1024 * 1024, timeout: 30000 }, (err, stdout) => {
         if (err) return resolve(null);
         try {
@@ -439,6 +446,7 @@ function startDownload(url, { folder = '', playlist = false } = {}) {
     '--newline', '--no-mtime', '--no-warnings',
     '--ignore-errors',                  // one bad playlist item shouldn't abort the rest
     '--download-archive', archive,      // skip items already pulled into this folder
+    ...ytCookies(),
     playlist ? '--yes-playlist' : '--no-playlist',
     '-o', outTemplate,
     '--merge-output-format', 'mp4',

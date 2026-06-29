@@ -70,6 +70,13 @@ playlist into its **own subfolder** (named after the playlist). Each folder keep
 a small download archive, so **re-pasting the same link skips items you already
 have**. HLS/segmented streams are merged into a single mp4.
 
+> **YouTube playlists / age-restricted content:** YouTube increasingly blocks
+> anonymous playlist requests (HTTP 403) and gates some videos behind a login.
+> If a playlist won't expand, export your browser cookies to a Netscape-format
+> **`cookies.txt`** and drop it next to `server.js` (`/opt/streamvault/cookies.txt`
+> on the LXC). It's picked up automatically for every download and never
+> committed. Channel / model / pornstar pages are treated as playlists too.
+
 Supported containers: mp4, mkv, webm, mov, avi, m4v, ts, m2ts, 3gp, ogv, and more.
 
 > **Browser playback note:** the server streams files directly (with HTTP range

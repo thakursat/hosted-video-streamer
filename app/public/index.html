@@ -506,6 +506,20 @@
     </div>
   </div>
 
+  <!-- Reusable confirm / prompt / alert dialog -->
+  <div class="dl-backdrop" id="dlgBackdrop"></div>
+  <div class="dl-modal" id="dlgModal" role="dialog" aria-modal="true" style="width:400px">
+    <div class="dl-head"><h2 id="dlgTitle">Confirm</h2></div>
+    <div class="dl-body">
+      <p class="dl-hint" id="dlgMsg" style="margin:0 0 14px"></p>
+      <input class="fld" id="dlgInput" style="display:none">
+      <div class="dlg-actions" style="display:flex;gap:10px;justify-content:flex-end;margin-top:18px">
+        <button class="btn" id="dlgCancel">Cancel</button>
+        <button class="btn btn-primary" id="dlgOk">OK</button>
+      </div>
+    </div>
+  </div>
+
   <div class="layout">
     <aside class="sidebar">
       <div class="sb-head">
@@ -557,6 +571,45 @@ const collapsed = new Set();
 const selected = new Set();
 
 function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+// ---- In-app dialogs (replace browser alert/confirm/prompt) ----
+const dlg = { resolve: null, mode: 'confirm' };
+const dlgModal = document.getElementById('dlgModal');
+const dlgBackdrop = document.getElementById('dlgBackdrop');
+const dlgTitle = document.getElementById('dlgTitle');
+const dlgMsg = document.getElementById('dlgMsg');
+const dlgInput = document.getElementById('dlgInput');
+const dlgOk = document.getElementById('dlgOk');
+const dlgCancel = document.getElementById('dlgCancel');
+function dlgClose(val) {
+  dlgModal.classList.remove('open'); dlgBackdrop.classList.remove('open');
+  const r = dlg.resolve; dlg.resolve = null; if (r) r(val);
+}
+function openDlg(opts) {
+  if (dlg.resolve) dlgClose(dlg.mode === 'prompt' ? null : false);
+  return new Promise(res => {
+    dlg.resolve = res; dlg.mode = opts.mode || 'confirm';
+    dlgTitle.textContent = opts.title || '';
+    dlgMsg.innerHTML = opts.message || ''; dlgMsg.style.display = opts.message ? '' : 'none';
+    const isPrompt = dlg.mode === 'prompt';
+    dlgInput.style.display = isPrompt ? '' : 'none';
+    if (isPrompt) dlgInput.value = opts.value || '';
+    dlgOk.textContent = opts.okText || 'OK';
+    dlgOk.classList.toggle('btn-danger', !!opts.danger);
+    dlgOk.classList.toggle('btn-primary', !opts.danger);
+    dlgCancel.style.display = dlg.mode === 'alert' ? 'none' : '';
+    dlgBackdrop.classList.add('open'); dlgModal.classList.add('open');
+    setTimeout(() => (isPrompt ? dlgInput : dlgOk).focus(), 60);
+  });
+}
+dlgOk.addEventListener('click', () => dlgClose(dlg.mode === 'prompt' ? dlgInput.value.trim() : true));
+dlgCancel.addEventListener('click', () => dlgClose(dlg.mode === 'prompt' ? null : false));
+dlgBackdrop.addEventListener('click', () => dlgClose(dlg.mode === 'prompt' ? null : false));
+dlgInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); dlgOk.click(); } });
+window.addEventListener('keydown', e => { if (e.key === 'Escape' && dlgModal.classList.contains('open')) dlgClose(dlg.mode === 'prompt' ? null : false); });
+function confirmModal(message, { title = 'Confirm', okText = 'OK', danger = false } = {}) { return openDlg({ mode: 'confirm', title, message, okText, danger }); }
+function promptModal(title, value = '', { okText = 'Save' } = {}) { return openDlg({ mode: 'prompt', title, value, okText }); }
+function alertModal(message, { title = 'Heads up' } = {}) { return openDlg({ mode: 'alert', title, message, okText: 'OK' }); }
 
 async function load() { await Promise.all([loadTree(), loadFolder()]); }
 
@@ -692,40 +745,41 @@ document.getElementById('selMove').addEventListener('click', () => openMove([...
 
 // ---- Video actions ----
 async function renameVideo(v) {
-  const name = prompt('Rename video', v.name);
-  if (name == null || !name.trim() || name.trim() === v.name) return;
-  const r = await fetch('/api/videos/' + v.id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim() }) });
-  if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.error || 'Rename failed.'); return; }
+  const name = await promptModal('Rename video', v.name);
+  if (name == null || !name || name === v.name) return;
+  const r = await fetch('/api/videos/' + v.id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+  if (!r.ok) { const d = await r.json().catch(() => ({})); alertModal(d.error || 'Rename failed.'); return; }
   load();
 }
 async function deleteVideos(ids) {
   if (!ids.length) return;
-  if (!confirm(ids.length === 1 ? 'Delete this video? The file is removed from disk.' : `Delete ${ids.length} videos? The files are removed from disk.`)) return;
+  const msg = ids.length === 1 ? 'Delete this video? The file is removed from disk.' : `Delete ${ids.length} videos? The files are removed from disk.`;
+  if (!await confirmModal(msg, { title: 'Delete', okText: 'Delete', danger: true })) return;
   const r = await fetch('/api/videos', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }) });
-  if (!r.ok) { alert('Delete failed.'); return; }
+  if (!r.ok) { alertModal('Delete failed.'); return; }
   selected.clear(); load();
 }
 
 // ---- Folder actions ----
 async function newFolderAction() {
-  const name = prompt('New folder name' + (currentFolder ? ' (inside ' + currentFolder + ')' : ''));
-  if (name == null || !name.trim()) return;
-  const r = await fetch('/api/folders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ parent: currentFolder, name: name.trim() }) });
-  if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.error || 'Could not create folder.'); return; }
+  const name = await promptModal('New folder name' + (currentFolder ? ' (inside ' + currentFolder + ')' : ''), '', { okText: 'Create' });
+  if (name == null || !name) return;
+  const r = await fetch('/api/folders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ parent: currentFolder, name }) });
+  if (!r.ok) { const d = await r.json().catch(() => ({})); alertModal(d.error || 'Could not create folder.'); return; }
   loadTree();
 }
 async function renameFolder(node) {
-  const name = prompt('Rename folder', node.name);
-  if (name == null || !name.trim() || name.trim() === node.name) return;
-  const r = await fetch('/api/folders', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: node.path, name: name.trim() }) });
-  if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.error || 'Rename failed.'); return; }
+  const name = await promptModal('Rename folder', node.name);
+  if (name == null || !name || name === node.name) return;
+  const r = await fetch('/api/folders', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: node.path, name }) });
+  if (!r.ok) { const d = await r.json().catch(() => ({})); alertModal(d.error || 'Rename failed.'); return; }
   if (currentFolder === node.path || currentFolder.startsWith(node.path + '/')) currentFolder = '';
   load();
 }
 async function deleteFolder(node) {
-  if (!confirm(`Delete folder “${node.name}” and its ${node.total} video(s)? This cannot be undone.`)) return;
+  if (!await confirmModal(`Delete folder “${escapeHtml(node.name)}” and its ${node.total} video(s)? This cannot be undone.`, { title: 'Delete folder', okText: 'Delete', danger: true })) return;
   const r = await fetch('/api/folders', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: node.path }) });
-  if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.error || 'Delete failed.'); return; }
+  if (!r.ok) { const d = await r.json().catch(() => ({})); alertModal(d.error || 'Delete failed.'); return; }
   if (currentFolder === node.path || currentFolder.startsWith(node.path + '/')) currentFolder = '';
   load();
 }
@@ -911,9 +965,11 @@ async function startDownload() {
 }
 document.getElementById('dlStart').addEventListener('click', startDownload);
 dlUrl.addEventListener('keydown', e => { if (e.key === 'Enter') startDownload(); });
-// Auto-enable "whole playlist" when the link looks like a playlist/set.
+// Auto-enable "whole playlist" when the link looks like a collection:
+// playlists/sets/albums, or a channel / model / pornstar / user page.
 dlUrl.addEventListener('input', () => {
-  if (/[?&]list=|\/playlist|\/sets\/|\/album\//i.test(dlUrl.value)) dlPlaylist.checked = true;
+  if (/[?&]list=|\/playlist|\/sets\/|\/album\/|\/model\/|\/pornstar\/|\/channels?\/|\/users?\/|youtube\.[^/]+\/(@|c\/|channel\/|user\/)/i.test(dlUrl.value))
+    dlPlaylist.checked = true;
 });
 
 async function refreshDownloads() {
@@ -1031,7 +1087,7 @@ let upPoll = null;
 const spin = t => '<span class="dl-dock-spin"></span> ' + t;
 
 document.getElementById('update').addEventListener('click', async () => {
-  if (!confirm('Update StreamVault to the latest version from GitHub?\n\nThe server will restart and this page will reload. In-progress downloads will be interrupted.')) return;
+  if (!await confirmModal('Update StreamVault to the latest version from GitHub? The server will restart and this page will reload. In-progress downloads will be interrupted.', { title: 'Update', okText: 'Update' })) return;
   upOverlay.classList.add('open');
   upClose.style.display = 'none';
   upTitle.innerHTML = spin('Updating…');
