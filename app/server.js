@@ -101,20 +101,70 @@ function randToken(n = 12) {
   return crypto.randomBytes(n).toString('hex').slice(0, n);
 }
 
-// jobId -> { id, status, percent, speed, eta, message, folder, proc }
+function humanSize(bytes) {
+  if (!bytes || bytes < 0) return '';
+  const u = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+  let i = 0, n = bytes;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return (n >= 100 || i === 0 ? n.toFixed(0) : n.toFixed(1)) + ' ' + u[i];
+}
+function fmtEta(sec) {
+  sec = Math.round(sec);
+  const m = Math.floor(sec / 60), s = sec % 60;
+  if (m >= 60) { const h = Math.floor(m / 60); return h + ':' + String(m % 60).padStart(2, '0') + ':' + String(s).padStart(2, '0'); }
+  return m + ':' + String(s).padStart(2, '0');
+}
+
+// jobId -> { id, status, percent, speed, eta, message, folder, proc, title, ... }
 const downloads = new Map();
 // SSE subscribers: jobId -> Set(res)
 const subscribers = new Map();
 
+// Public, serialisable view of a job (no proc / buffers).
+function jobView(job) {
+  return {
+    id: job.id, status: job.status, percent: job.percent,
+    speed: job.speed, eta: job.eta, message: job.message,
+    title: job.title || '', uploader: job.uploader || '',
+    duration: job.duration || 0,
+    downloadedBytes: job.downloadedBytes || 0,
+    totalBytes: job.totalBytes || 0,
+    hasThumb: !!job.thumbUrl
+  };
+}
+
 function emit(jobId) {
   const job = downloads.get(jobId);
   if (!job) return;
-  const payload = JSON.stringify({
-    id: job.id, status: job.status, percent: job.percent,
-    speed: job.speed, eta: job.eta, message: job.message
-  });
+  const payload = JSON.stringify(jobView(job));
   const subs = subscribers.get(jobId);
   if (subs) for (const res of subs) res.write(`data: ${payload}\n\n`);
+}
+
+// Lightweight metadata probe (title, thumbnail, duration) — no download.
+function fetchMeta(url) {
+  return new Promise((resolve) => {
+    execFile('yt-dlp', ['-J', '--no-playlist', '--no-warnings', '--no-progress', url],
+      { maxBuffer: 32 * 1024 * 1024, timeout: 30000 }, (err, stdout) => {
+        if (err) return resolve(null);
+        try {
+          const j = JSON.parse(stdout);
+          let thumb = j.thumbnail || '';
+          if (Array.isArray(j.thumbnails) && j.thumbnails.length) {
+            const sorted = j.thumbnails.filter(t => t.url).sort((a, b) => (a.width || 0) - (b.width || 0));
+            const pick = sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.6))];
+            if (pick) thumb = pick.url;
+          }
+          resolve({
+            title: j.title || j.fulltitle || '',
+            uploader: j.uploader || j.channel || j.extractor_key || '',
+            duration: Math.round(j.duration || 0),
+            thumbUrl: thumb,
+            totalBytes: j.filesize || j.filesize_approx || 0
+          });
+        } catch { resolve(null); }
+      });
+  });
 }
 
 function startDownload(url) {
@@ -128,19 +178,35 @@ function startDownload(url) {
 
   const job = {
     id, status: 'starting', percent: 0, speed: '', eta: '',
-    message: 'Preparing download…', folder, url
+    message: 'Preparing download…', folder, url,
+    title: '', uploader: '', duration: 0,
+    downloadedBytes: 0, totalBytes: 0,
+    thumbUrl: '', thumbBuf: null, thumbType: ''
   };
   downloads.set(id, job);
 
+  // Probe title / thumbnail / duration in the background and stream it to the UI.
+  fetchMeta(url).then(meta => {
+    if (!meta || job.status === 'cancelled' || job.status === 'done' || job.status === 'error') return;
+    job.title = meta.title; job.uploader = meta.uploader;
+    job.duration = meta.duration; job.thumbUrl = meta.thumbUrl;
+    if (!job.totalBytes && meta.totalBytes) job.totalBytes = meta.totalBytes;
+    emit(id);
+  });
+
   // --newline gives one progress line per update; --no-playlist keeps it to the
   // single item unless the URL is explicitly a playlist (yt-dlp handles m3u8 too).
+  // --progress-template emits machine-readable byte/speed/eta fields.
   const args = [
     '--newline',
     '--no-mtime',
     '--no-part',
+    '--no-warnings',
     '-o', outTemplate,
     // Merge HLS/segmented streams into a single mp4 when possible.
     '--merge-output-format', 'mp4',
+    '--progress-template',
+    'PROG|%(progress.status)s|%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.total_bytes_estimate)s|%(progress.speed)s|%(progress.eta)s',
     url
   ];
 
@@ -158,7 +224,24 @@ function startDownload(url) {
   emit(id);
 
   const handleLine = (line) => {
-    // Progress lines look like:  [download]  42.3% of 120.00MiB at 3.20MiB/s ETA 00:21
+    // Machine-readable progress from --progress-template (fields may be "NA").
+    if (line.startsWith('PROG|')) {
+      const [, , dlb, tb, tbe, sp, eta] = line.split('|');
+      const downloaded = parseInt(dlb, 10) || 0;
+      const total = parseInt(tb, 10) || parseInt(tbe, 10) || 0;
+      const speed = parseFloat(sp) || 0;
+      const etaN = parseInt(eta, 10);
+      job.downloadedBytes = downloaded;
+      if (total) job.totalBytes = total;
+      if (total) job.percent = Math.min(100, (downloaded / total) * 100);
+      job.speed = speed ? humanSize(speed) + '/s' : '';
+      job.eta = (isFinite(etaN) && etaN >= 0) ? fmtEta(etaN) : '';
+      job.message = `Downloading ${job.percent.toFixed(1)}%`;
+      job.status = 'downloading';
+      emit(id);
+      return;
+    }
+    // Fallback progress line:  [download]  42.3% of 120.00MiB at 3.20MiB/s ETA 00:21
     const dl = /\[download\]\s+([\d.]+)%(?:.*?at\s+([\d.]+\s*\w+\/s))?(?:.*?ETA\s+([\d:]+))?/.exec(line);
     if (dl) {
       job.percent = parseFloat(dl[1]);
@@ -218,6 +301,20 @@ function startDownload(url) {
 
   return job;
 }
+
+// ---------------------------------------------------------------------------
+// Keep yt-dlp current — stale binaries fail with "HTTP Error 410: Gone".
+// Self-updates the standalone binary on boot, then every 12h.
+// ---------------------------------------------------------------------------
+function updateYtDlp() {
+  execFile('yt-dlp', ['-U'], { timeout: 120000 }, (err, stdout) => {
+    const line = (stdout || '').trim().split('\n').filter(Boolean).pop();
+    if (err) console.warn('  yt-dlp self-update skipped:', (err.message || '').split('\n')[0]);
+    else if (line) console.log(`  yt-dlp: ${line}`);
+  });
+}
+updateYtDlp();
+setInterval(updateYtDlp, 12 * 60 * 60 * 1000).unref();
 
 // ---------------------------------------------------------------------------
 // App
@@ -308,10 +405,24 @@ app.post('/api/download', requireAuth, (req, res) => {
 });
 
 app.get('/api/downloads', requireAuth, (req, res) => {
-  res.json([...downloads.values()].map(j => ({
-    id: j.id, status: j.status, percent: j.percent,
-    speed: j.speed, eta: j.eta, message: j.message
-  })));
+  res.json([...downloads.values()].map(jobView));
+});
+
+// Proxy the source thumbnail for an in-progress download (cached in memory).
+app.get('/api/download/:id/thumb', requireAuth, async (req, res) => {
+  const job = downloads.get(req.params.id);
+  if (!job || !job.thumbUrl) return res.status(404).end();
+  try {
+    if (!job.thumbBuf) {
+      const r = await fetch(job.thumbUrl);
+      if (!r.ok) return res.status(404).end();
+      job.thumbBuf = Buffer.from(await r.arrayBuffer());
+      job.thumbType = r.headers.get('content-type') || 'image/jpeg';
+    }
+    res.setHeader('Content-Type', job.thumbType || 'image/jpeg');
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.end(job.thumbBuf);
+  } catch { res.status(404).end(); }
 });
 
 // Server-Sent Events stream of progress for one job.
@@ -323,7 +434,7 @@ app.get('/api/download/:id/events', requireAuth, (req, res) => {
     'Cache-Control': 'no-cache',
     'Connection': 'keep-alive'
   });
-  res.write(`data: ${JSON.stringify({ id: job.id, status: job.status, percent: job.percent, speed: job.speed, eta: job.eta, message: job.message })}\n\n`);
+  res.write(`data: ${JSON.stringify(jobView(job))}\n\n`);
   if (!subscribers.has(job.id)) subscribers.set(job.id, new Set());
   subscribers.get(job.id).add(res);
   req.on('close', () => { subscribers.get(job.id)?.delete(res); });

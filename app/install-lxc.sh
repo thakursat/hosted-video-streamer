@@ -20,6 +20,30 @@ if ! command -v yt-dlp >/dev/null 2>&1; then
 fi
 echo "    node $(node --version), ffmpeg $(ffmpeg -version | head -1 | awk '{print $3}'), yt-dlp $(yt-dlp --version)"
 
+# Keep yt-dlp current — a stale binary throws "HTTP Error 410: Gone".
+echo "==> Scheduling daily yt-dlp updates..."
+cat >/etc/systemd/system/yt-dlp-update.service <<'UNIT'
+[Unit]
+Description=Update yt-dlp to the latest release
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/yt-dlp -U
+UNIT
+cat >/etc/systemd/system/yt-dlp-update.timer <<'UNIT'
+[Unit]
+Description=Daily yt-dlp self-update
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=1h
+[Install]
+WantedBy=timers.target
+UNIT
+systemctl daemon-reload
+systemctl enable --now yt-dlp-update.timer || true
+
 # This script expects to be run from inside the unpacked streamvault directory,
 # OR for the app to already be at $APP_DIR.
 if [ -f "./server.js" ] && [ "$(pwd)" != "$APP_DIR" ]; then

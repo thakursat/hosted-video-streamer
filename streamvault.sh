@@ -139,6 +139,31 @@ run "curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp
   || die "yt-dlp install failed."
 msg_ok "yt-dlp installed"
 
+msg_info "Scheduling daily yt-dlp updates"
+# Stale yt-dlp throws 'HTTP Error 410: Gone'. Keep it current via a systemd timer.
+run "cat >/etc/systemd/system/yt-dlp-update.service <<'UNIT'
+[Unit]
+Description=Update yt-dlp to the latest release
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/yt-dlp -U
+UNIT"
+run "cat >/etc/systemd/system/yt-dlp-update.timer <<'UNIT'
+[Unit]
+Description=Daily yt-dlp self-update
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=1h
+[Install]
+WantedBy=timers.target
+UNIT"
+run "systemctl daemon-reload && systemctl enable --now yt-dlp-update.timer >/dev/null 2>&1" \
+  || msg_info "yt-dlp update timer not enabled (non-fatal)"
+msg_ok "yt-dlp daily updates scheduled"
+
 msg_info "Deploying StreamVault"
 run "mkdir -p /opt/streamvault && curl -fsSL '${APP_ARCHIVE_URL}' -o /tmp/sv.tar.gz" \
   || die "Could not download app archive from ${APP_ARCHIVE_URL}"
