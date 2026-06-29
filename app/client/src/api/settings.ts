@@ -6,6 +6,7 @@ export const settingsApi = {
   setProxy: (proxy: string) => api.post('/settings', { proxy }).then(r => r.data),
   ytdlpVersion: () => api.get<YtDlpVersion>('/ytdlp/version').then(r => r.data),
   ytdlpUpdate: () => api.post<{ ok: boolean; version: string }>('/ytdlp/update').then(r => r.data),
+  appUpdateUrl: () => `${api.defaults.baseURL}/app/update/stream`,
 };
 
 export const authApi = {

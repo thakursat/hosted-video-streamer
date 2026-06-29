@@ -15,6 +15,7 @@ import downloadsRouter from './routes/downloads';
 import batchRouter from './routes/batch';
 import settingsRouter from './routes/settings';
 import uploadRouter from './routes/upload';
+import appUpdateRouter from './routes/appUpdate';
 import { requireAuth } from './middleware/auth';
 import { errorHandler } from './middleware/error';
 
@@ -81,6 +82,7 @@ app.use('/api', downloadsRouter);
 app.use('/api', batchRouter);
 app.use('/api', settingsRouter);
 app.use('/api', uploadRouter);
+app.use('/api', appUpdateRouter);
 
 // ── Serve React SPA ───────────────────────────────────────────────────────────
 

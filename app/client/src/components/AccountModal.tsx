@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogBody } from './
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { authApi, settingsApi } from '@/api/settings';
+import { AppUpdateModal } from './AppUpdateModal';
 
 interface AccountModalProps {
   open: boolean;
@@ -20,6 +21,7 @@ export function AccountModal({ open, onClose }: AccountModalProps) {
   const [currentPw, setCurrentPw] = useState('');
   const [newPw, setNewPw] = useState('');
   const [proxy, setProxy] = useState('');
+  const [showUpdate, setShowUpdate] = useState(false);
 
   useEffect(() => { if (me) setEmail(me.email); }, [me]);
   useEffect(() => { if (settings) setProxy(settings.proxy); }, [settings]);
@@ -37,6 +39,7 @@ export function AccountModal({ open, onClose }: AccountModalProps) {
   });
 
   return (
+    <>
     <Dialog open={open} onOpenChange={o => !o && onClose()}>
       <DialogContent className="max-w-md">
         <DialogHeader>
@@ -93,8 +96,22 @@ export function AccountModal({ open, onClose }: AccountModalProps) {
               Save proxy
             </Button>
           </div>
+
+          <div className="border-t border-border" />
+
+          {/* App update */}
+          <div className="space-y-3">
+            <p className="text-xs font-medium uppercase tracking-wider text-text-subtle">Application</p>
+            <p className="text-xs text-text-muted">Pull the latest release from GitHub and rebuild. The server will restart automatically.</p>
+            <Button variant="secondary" className="w-full" onClick={() => setShowUpdate(true)}>
+              Update application
+            </Button>
+          </div>
         </DialogBody>
       </DialogContent>
     </Dialog>
+
+    <AppUpdateModal open={showUpdate} onClose={() => setShowUpdate(false)} />
+    </>
   );
 }
