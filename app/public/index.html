@@ -622,7 +622,9 @@ async function loadTree() {
 }
 
 async function loadFolder() {
-  const r = await fetch('/api/videos?folder=' + encodeURIComponent(currentFolder));
+  // "All videos" (root) shows the whole library; a folder shows its contents.
+  const url = currentFolder === '' ? '/api/videos?all=1' : '/api/videos?folder=' + encodeURIComponent(currentFolder);
+  const r = await fetch(url);
   if (r.status === 401) { location.href = '/login'; return; }
   videos = await r.json();
   selected.clear(); updateBulk();
@@ -691,7 +693,9 @@ function render() {
     const card = document.createElement('div');
     card.className = 'card' + (selected.has(v.id) ? ' sel' : '');
     const res = v.height ? v.height + 'p' : '';
-    const sub = [res, humanSize(v.size)].filter(Boolean);
+    // In the "All videos" view, show which folder each video lives in.
+    const folderTag = (currentFolder === '' && v.dir) ? v.dir : '';
+    const sub = [folderTag, res, humanSize(v.size)].filter(Boolean);
     card.innerHTML = `
       <div class="thumb" style="background-image:url('/thumb/${v.id}')">
         <div class="ph"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 4h16v16H4zM9 9l6 3-6 3z"/></svg></div>
