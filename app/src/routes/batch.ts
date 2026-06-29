@@ -5,7 +5,7 @@ import crypto from 'crypto';
 import type { Response } from 'express';
 import { requireAuth } from '../middleware/auth';
 import { rescan, safePath, getMediaRoot, buildMeta } from '../services/library';
-import { ytNetArgs, spawnDownload, fetchPlaylistEntries, netHint } from '../services/ytdlp';
+import { ytNetArgs, spawnDownload, fetchPlaylistEntries, netHint, normalizeUrl } from '../services/ytdlp';
 import type { BatchJob, BatchItem } from '../types';
 
 const router = Router();
@@ -161,7 +161,7 @@ async function runBatch(b: BatchJob): Promise<void> {
 // ── Routes ────────────────────────────────────────────────────────────────────
 
 router.post('/playlist/probe', requireAuth, async (req, res) => {
-  const url = String(req.body?.url || '').trim();
+  const url = normalizeUrl(String(req.body?.url || '').trim());
   if (!url) { res.status(400).json({ error: 'url required' }); return; }
   try {
     res.json(await fetchPlaylistEntries(url));
@@ -171,7 +171,7 @@ router.post('/playlist/probe', requireAuth, async (req, res) => {
 });
 
 router.post('/playlist/download', requireAuth, (req, res) => {
-  const url = String(req.body?.url || '').trim();
+  const url = normalizeUrl(String(req.body?.url || '').trim());
   const folder = String(req.body?.folder || '').replace(/^[/\\]+/, '');
   const title = String(req.body?.title || 'Playlist');
   const concurrency = Math.min(

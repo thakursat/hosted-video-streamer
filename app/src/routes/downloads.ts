@@ -5,7 +5,7 @@ import crypto from 'crypto';
 import type { Response } from 'express';
 import { requireAuth } from '../middleware/auth';
 import { rescan, safePath, getMediaRoot } from '../services/library';
-import { ytNetArgs, spawnDownload, fetchMeta, netHint } from '../services/ytdlp';
+import { ytNetArgs, spawnDownload, fetchMeta, netHint, normalizeUrl } from '../services/ytdlp';
 import { buildMeta } from '../services/library';
 import type { DownloadJob } from '../types';
 
@@ -51,7 +51,8 @@ router.get('/download/:id/events', requireAuth, (req, res) => {
 });
 
 router.post('/download', requireAuth, async (req, res) => {
-  const url = String(req.body?.url || '').trim();
+  const rawUrl = String(req.body?.url || '').trim();
+  const url = normalizeUrl(rawUrl);
   const folder = String(req.body?.folder || '').replace(/^[/\\]+/, '');
   if (!url) { res.status(400).json({ error: 'url required' }); return; }
 

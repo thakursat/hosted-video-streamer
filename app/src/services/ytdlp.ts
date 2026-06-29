@@ -11,6 +11,19 @@ export function ytDlpBin(): string {
   return fs.existsSync(YT_DLP_LOCAL) ? YT_DLP_LOCAL : 'yt-dlp';
 }
 
+// Rewrite URLs where the TLD or subdomain doesn't match yt-dlp's extractor.
+const URL_REWRITES: [RegExp, string][] = [
+  [/^(https?:\/\/(?:www\.)?pornhub)\.(org|net|info)(\/.*)?$/i, '$1.com$3'],
+];
+
+export function normalizeUrl(url: string): string {
+  for (const [pattern, replacement] of URL_REWRITES) {
+    const rewritten = url.replace(pattern, replacement);
+    if (rewritten !== url) return rewritten;
+  }
+  return url;
+}
+
 // Rotate real browser UAs so yt-dlp requests look like a normal browser.
 const BROWSER_UAS = [
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
@@ -64,7 +77,7 @@ export function netHint(msg: string): string {
 
 export async function fetchPlaylistEntries(url: string): Promise<PlaylistProbeResult> {
   const { stdout } = await execFileP(ytDlpBin(), [
-    '-J', '--flat-playlist', '--no-warnings', ...ytNetArgs(), url,
+    '-J', '--flat-playlist', '--no-warnings', ...ytNetArgs(), normalizeUrl(url),
   ], { timeout: 60000, maxBuffer: 50 * 1024 * 1024 });
 
   const j = JSON.parse(stdout);
@@ -86,7 +99,7 @@ export async function fetchPlaylistEntries(url: string): Promise<PlaylistProbeRe
 
 export async function fetchMeta(url: string): Promise<{ title: string; uploader?: string; thumbUrl?: string }> {
   const { stdout } = await execFileP(ytDlpBin(), [
-    '-J', '--no-playlist', '--no-warnings', ...ytNetArgs(), url,
+    '-J', '--no-playlist', '--no-warnings', ...ytNetArgs(), normalizeUrl(url),
   ], { timeout: 30000, maxBuffer: 10 * 1024 * 1024 });
 
   const j = JSON.parse(stdout);
