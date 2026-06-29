@@ -789,13 +789,16 @@ function playIndex(i) {
   const v = videos[i];
   ptitle.textContent = v.name;
   player.classList.add('open', 'show-ctrl');
-  // Per-video scrub-preview (peek) source.
-  plyr.config.previewThumbnails.src = '/api/videos/' + v.id + '/thumbs.vtt';
+  // Per-video scrub-preview (peek). Plyr wires this reliably via the source
+  // object (it re-inits its previewThumbnails plugin on each source change).
+  const vtt = '/api/videos/' + v.id + '/thumbs.vtt';
+  plyr.config.previewThumbnails.src = vtt;
   plyr.source = {
     type: 'video',
     title: v.name,
     sources: [{ src: '/stream/' + v.id, type: 'video/mp4' }],
-    poster: '/thumb/' + v.id
+    poster: '/thumb/' + v.id,
+    previewThumbnails: { enabled: true, src: vtt }
   };
   plyr.download = location.origin + '/api/videos/' + v.id + '/download'; // wire the Download control
   plyr.once('loadedmetadata', () => {
@@ -908,6 +911,10 @@ async function startDownload() {
 }
 document.getElementById('dlStart').addEventListener('click', startDownload);
 dlUrl.addEventListener('keydown', e => { if (e.key === 'Enter') startDownload(); });
+// Auto-enable "whole playlist" when the link looks like a playlist/set.
+dlUrl.addEventListener('input', () => {
+  if (/[?&]list=|\/playlist|\/sets\/|\/album\//i.test(dlUrl.value)) dlPlaylist.checked = true;
+});
 
 async function refreshDownloads() {
   const r = await fetch('/api/downloads');
