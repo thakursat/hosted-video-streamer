@@ -30,11 +30,14 @@ export function ytNetArgs(): string[] {
   args.push(
     '--user-agent', ua,
     '--add-header', 'Accept-Language:en-US,en;q=0.9',
-    '--retries', '5',
+    '--force-ipv4',
+    '--geo-bypass',
+    '--retries', '10',
     '--fragment-retries', '10',
     '--socket-timeout', '30',
-    '--extractor-retries', '3',
-    '--sleep-requests', '1',
+    '--extractor-retries', '5',
+    '--sleep-requests', '2',
+    '--no-check-certificates',
   );
   return args;
 }
