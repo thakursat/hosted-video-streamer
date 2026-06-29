@@ -24,18 +24,19 @@ npm start
 
 Open http://localhost:8080
 
-On first run a `config.json` is created with a default login:
+On first run a `config.json` is created with **no account**. Open
+http://localhost:8080 and the signup screen lets you create the single admin
+account (email + password, 8+ chars). Once it exists, signup is locked and only
+sign-in is shown.
 
-- **email:** `admin@local`
-- **password:** `changeme`
-
-Change it immediately:
+Change your email or password anytime from the in-app **Account** button.
+Prefer the CLI (or locked yourself out)? Seed/reset it directly:
 
 ```bash
 npm run set-password your@email.com "your-strong-password"
 ```
 
-(Restart the server after changing it.)
+(Restart the server after running the CLI.)
 
 ## Adding videos
 
@@ -67,12 +68,18 @@ Supported containers: mp4, mkv, webm, mov, avi, m4v, ts, m2ts, 3gp, ogv, and mor
 ```json
 {
   "port": 8080,
-  "email": "admin@local",
-  "passwordHash": "<bcrypt hash>",
+  "email": "",
+  "passwordHash": "",
   "mediaDir": "/absolute/path/to/media",
-  "sessionSecret": "<random>"
+  "sessionSecret": "<random>",
+  "updateUrl": "https://raw.githubusercontent.com/thakursat/hosted-video-streamer/main/streamvault-app.tar.gz"
 }
 ```
+
+`email` and `passwordHash` are empty until you create an account via the signup
+screen (or `npm run set-password`). `updateUrl` is the tarball the in-app
+**Update** button pulls from — override it (or set the `SV_UPDATE_URL` env var)
+if you fork the repo.
 
 Point `mediaDir` anywhere — e.g. an external drive or an existing library
 folder. Thumbnails are cached in `thumbnails/` keyed by file path.

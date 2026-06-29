@@ -219,8 +219,9 @@ msg_ok "${GN}${APP} installation complete!${CL}"
 echo
 echo -e " ${INFO} Access it at:  ${GN}http://${IP:-<container-ip>}:${APP_PORT}${CL}"
 echo
-echo -e " ${INFO} Default login: ${YW}admin@local${CL} / ${YW}changeme${CL}"
-echo -e " ${INFO} ${RD}Change it now${CL} from the host:"
+echo -e " ${INFO} ${GN}Open the URL above and create your account${CL} on the first visit."
+echo -e "      (No default password — the signup screen appears until an account exists.)"
+echo -e " ${INFO} Prefer the command line? Seed the account from the host:"
 echo -e "      ${BL}pct exec ${CT_ID} -- bash -c \"cd /opt/streamvault && sudo -u streamvault npm run set-password you@example.com 'your-password'\"${CL}"
 echo -e "      ${BL}pct exec ${CT_ID} -- systemctl restart streamvault${CL}"
 echo

@@ -25,14 +25,14 @@ unprivileged, DHCP.**
 
 When it finishes it prints the access URL, e.g. `http://<container-ip>:8080`.
 
-### Default login
+### Create your account
 
-```
-email:    admin@local
-password: changeme
-```
+There is **no default password**. On the first visit the app shows a signup
+screen — pick your email and password there, and that becomes the single admin
+account. After that the signup screen is locked and only sign-in is shown.
 
-Change it immediately (from the Proxmox host):
+Change your email or password later from the in-app **Account** button. Forgot
+it? Reseed from the Proxmox host:
 
 ```bash
 pct exec <CTID> -- bash -c "cd /opt/streamvault && sudo -u streamvault npm run set-password you@example.com 'your-password'"

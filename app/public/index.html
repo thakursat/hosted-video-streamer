@@ -210,6 +210,15 @@
     line-height: 1.55; color: var(--muted); white-space: pre-wrap; word-break: break-word;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
   .up-foot { padding: 12px 20px; border-top: 1px solid var(--line); display: flex; justify-content: flex-end; }
+
+  /* Account form fields */
+  .fld-label { display: block; font-size: .74rem; color: var(--muted); margin: 14px 0 6px; letter-spacing: .02em; }
+  .fld-label:first-child { margin-top: 0; }
+  .fld-hint { color: #5f6470; }
+  .fld { width: 100%; background: #0e0f13; border: 1px solid var(--line); border-radius: 9px;
+    color: var(--text); padding: 10px 12px; font-size: .9rem; }
+  .fld:focus { outline: none; border-color: var(--accent); }
+  .acct-ok { color: var(--accent); font-size: .82rem; margin-top: 10px; display: none; }
 </style>
 </head>
 <body>
@@ -223,6 +232,7 @@
       <button class="btn btn-primary" id="addVideos">+ Add videos</button>
       <button class="btn" id="rescan">Rescan</button>
       <button class="btn" id="update" title="Pull the latest version from GitHub">Update</button>
+      <button class="btn" id="account" title="Change email or password">Account</button>
       <button class="btn" id="logout">Sign out</button>
     </div>
   </header>
@@ -267,6 +277,30 @@
       <div class="up-title" id="upTitle">Updating…</div>
       <pre class="up-log" id="upLog"></pre>
       <div class="up-foot"><button class="btn" id="upClose" style="display:none">Close</button></div>
+    </div>
+  </div>
+
+  <!-- Account settings -->
+  <div class="dl-backdrop" id="acctBackdrop"></div>
+  <div class="dl-modal" id="acctModal" role="dialog" aria-modal="true" aria-label="Account settings" style="width:440px">
+    <div class="dl-head">
+      <h2>Account</h2>
+      <button class="iconbtn sm" id="acctClose" title="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+    <div class="dl-body">
+      <label class="fld-label" for="acctEmail">Email</label>
+      <input class="fld" id="acctEmail" type="email" autocomplete="username">
+      <label class="fld-label" for="acctCurrent">Current password</label>
+      <input class="fld" id="acctCurrent" type="password" autocomplete="current-password" placeholder="••••••••">
+      <label class="fld-label" for="acctNew">New password <span class="fld-hint">(leave blank to keep)</span></label>
+      <input class="fld" id="acctNew" type="password" autocomplete="new-password" placeholder="At least 8 characters">
+      <label class="fld-label" for="acctConfirm">Confirm new password</label>
+      <input class="fld" id="acctConfirm" type="password" autocomplete="new-password" placeholder="••••••••">
+      <div class="dl-err" id="acctErr"></div>
+      <div class="acct-ok" id="acctOk">Saved.</div>
+      <button class="btn btn-primary" id="acctSave" style="width:100%;margin-top:8px">Save changes</button>
     </div>
   </div>
 
@@ -686,6 +720,49 @@ function pollUpdate() {
     }
   }, 1000);
 }
+
+// ---- Account settings ----
+const acctModal = document.getElementById('acctModal');
+const acctBackdrop = document.getElementById('acctBackdrop');
+const acctErr = document.getElementById('acctErr');
+const acctOk = document.getElementById('acctOk');
+const acctEmail = document.getElementById('acctEmail');
+const acctCurrent = document.getElementById('acctCurrent');
+const acctNew = document.getElementById('acctNew');
+const acctConfirm = document.getElementById('acctConfirm');
+
+async function openAccount() {
+  acctErr.style.display = 'none'; acctOk.style.display = 'none';
+  acctCurrent.value = ''; acctNew.value = ''; acctConfirm.value = '';
+  try { const r = await fetch('/api/me'); const d = await r.json(); acctEmail.value = d.user || ''; } catch {}
+  acctModal.classList.add('open'); acctBackdrop.classList.add('open');
+  setTimeout(() => acctCurrent.focus(), 60);
+}
+function closeAccount() { acctModal.classList.remove('open'); acctBackdrop.classList.remove('open'); }
+document.getElementById('account').addEventListener('click', openAccount);
+document.getElementById('acctClose').addEventListener('click', closeAccount);
+acctBackdrop.addEventListener('click', closeAccount);
+
+async function saveAccount() {
+  acctErr.style.display = 'none'; acctOk.style.display = 'none';
+  const newPassword = acctNew.value;
+  if (newPassword || acctConfirm.value) {
+    if (newPassword.length < 8) { acctErr.textContent = 'New password must be at least 8 characters.'; acctErr.style.display = 'block'; return; }
+    if (newPassword !== acctConfirm.value) { acctErr.textContent = 'New passwords do not match.'; acctErr.style.display = 'block'; return; }
+  }
+  const r = await fetch('/api/change-password', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ currentPassword: acctCurrent.value, newPassword, email: acctEmail.value.trim() })
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) { acctErr.textContent = d.error || 'Could not save changes.'; acctErr.style.display = 'block'; return; }
+  acctOk.style.display = 'block';
+  acctCurrent.value = ''; acctNew.value = ''; acctConfirm.value = '';
+  setTimeout(closeAccount, 900);
+}
+document.getElementById('acctSave').addEventListener('click', saveAccount);
+acctModal.addEventListener('keydown', e => { if (e.key === 'Enter') saveAccount(); });
+window.addEventListener('keydown', e => { if (e.key === 'Escape' && acctModal.classList.contains('open')) closeAccount(); });
 
 load();
 refreshDownloads(); // resume any in-flight downloads on page load

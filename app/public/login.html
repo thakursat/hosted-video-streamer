@@ -88,35 +88,75 @@
       <div class="mark"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></div>
       <h1>StreamVault</h1>
     </div>
-    <p class="sub">Sign in to reach your library.</p>
+    <p class="sub" id="sub">Sign in to reach your library.</p>
     <div class="err" id="err"></div>
     <label for="email">Email</label>
     <input id="email" type="email" autocomplete="username" placeholder="you@local">
     <label for="password">Password</label>
     <input id="password" type="password" autocomplete="current-password" placeholder="••••••••">
+    <div id="confirmWrap" style="display:none">
+      <label for="confirm">Confirm password</label>
+      <input id="confirm" type="password" autocomplete="new-password" placeholder="••••••••">
+    </div>
     <button id="go">Sign in</button>
   </div>
 <script>
   const err = document.getElementById('err');
+  const sub = document.getElementById('sub');
+  const goBtn = document.getElementById('go');
+  const confirmWrap = document.getElementById('confirmWrap');
+  const emailEl = document.getElementById('email');
+  const passwordEl = document.getElementById('password');
+  const confirmEl = document.getElementById('confirm');
+  let mode = 'login'; // or 'signup'
+
+  function showErr(msg) { err.textContent = msg; err.style.display = 'block'; }
+
+  async function init() {
+    try {
+      const r = await fetch('/api/setup-state');
+      const d = await r.json();
+      if (!d.hasAccount) setSignup();
+    } catch {}
+  }
+  function setSignup() {
+    mode = 'signup';
+    document.title = 'StreamVault — Create account';
+    sub.textContent = 'Welcome — create your account to get started.';
+    goBtn.textContent = 'Create account';
+    confirmWrap.style.display = '';
+    passwordEl.setAttribute('autocomplete', 'new-password');
+    passwordEl.placeholder = 'At least 8 characters';
+  }
+
   async function submit() {
     err.style.display = 'none';
-    const email = document.getElementById('email').value.trim();
-    const password = document.getElementById('password').value;
+    const email = emailEl.value.trim();
+    const password = passwordEl.value;
+    if (mode === 'signup') {
+      if (password.length < 8) return showErr('Password must be at least 8 characters.');
+      if (password !== confirmEl.value) return showErr('Passwords do not match.');
+      const r = await fetch('/api/signup', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+      if (r.ok) { location.href = '/'; return; }
+      const d = await r.json().catch(() => ({}));
+      showErr(d.error || 'Could not create account.');
+      return;
+    }
     const r = await fetch('/api/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password })
     });
     if (r.ok) { location.href = '/'; }
-    else {
-      const d = await r.json().catch(() => ({}));
-      err.textContent = d.error || 'Sign in failed.';
-      err.style.display = 'block';
-    }
+    else { const d = await r.json().catch(() => ({})); showErr(d.error || 'Sign in failed.'); }
   }
-  document.getElementById('go').addEventListener('click', submit);
+
+  goBtn.addEventListener('click', submit);
   document.querySelectorAll('input').forEach(i =>
     i.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); }));
+  init();
 </script>
 </body>
 </html>

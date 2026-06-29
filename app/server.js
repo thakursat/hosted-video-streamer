@@ -16,28 +16,28 @@ const CONFIG_PATH = join(__dirname, 'config.json');
 
 function loadConfig() {
   if (!fs.existsSync(CONFIG_PATH)) {
-    const defaultPassword = 'changeme';
     const cfg = {
       port: 8080,
-      email: 'admin@local',
-      // bcrypt hash of "changeme" — change this by running: npm run set-password
-      passwordHash: bcrypt.hashSync(defaultPassword, 10),
+      // No account yet — the first visitor creates one via the signup screen.
+      email: '',
+      passwordHash: '',
       mediaDir: join(__dirname, 'media'),
       sessionSecret: crypto.randomBytes(32).toString('hex'),
       // Tarball the in-app "Update" button pulls from. Override per fork.
       updateUrl: 'https://raw.githubusercontent.com/thakursat/hosted-video-streamer/main/streamvault-app.tar.gz'
     };
     fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2));
-    console.log('\n  Created config.json with default login:');
-    console.log('    email:    admin@local');
-    console.log('    password: changeme');
-    console.log('  Change these before exposing the server.\n');
+    console.log('\n  Created config.json — open the app to create your account.\n');
     return cfg;
   }
   return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
 }
 
 const config = loadConfig();
+function saveConfig() { fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2)); }
+function hasAccount() { return !!(config.email && config.passwordHash); }
+// Lenient — allows local addresses like "you@local" on a private server.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+$/;
 const THUMB_DIR = join(__dirname, 'thumbnails');
 if (!fs.existsSync(config.mediaDir)) fs.mkdirSync(config.mediaDir, { recursive: true });
 if (!fs.existsSync(THUMB_DIR)) fs.mkdirSync(THUMB_DIR, { recursive: true });
@@ -352,6 +352,41 @@ app.post('/api/logout', (req, res) => req.session.destroy(() => res.json({ ok: t
 
 app.get('/api/me', (req, res) =>
   res.json({ user: req.session?.user || null }));
+
+// Tells the login page whether to show sign-in or first-run signup.
+app.get('/api/setup-state', (req, res) => res.json({ hasAccount: hasAccount() }));
+
+// First-run signup — allowed only while no account exists.
+app.post('/api/signup', (req, res) => {
+  if (hasAccount()) return res.status(403).json({ error: 'An account already exists. Please sign in.' });
+  const email = (req.body?.email || '').trim();
+  const password = req.body?.password || '';
+  if (!EMAIL_RE.test(email)) return res.status(400).json({ error: 'Enter a valid email address.' });
+  if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters.' });
+  config.email = email;
+  config.passwordHash = bcrypt.hashSync(password, 10);
+  saveConfig();
+  req.session.user = email;
+  res.json({ ok: true });
+});
+
+// Change email / password for the signed-in account.
+app.post('/api/change-password', requireAuth, (req, res) => {
+  const current = req.body?.currentPassword || '';
+  const newPassword = req.body?.newPassword || '';
+  const newEmail = (req.body?.email || '').trim();
+  if (!bcrypt.compareSync(current, config.passwordHash))
+    return res.status(401).json({ error: 'Current password is incorrect.' });
+  if (newPassword && newPassword.length < 8)
+    return res.status(400).json({ error: 'New password must be at least 8 characters.' });
+  if (newEmail && !EMAIL_RE.test(newEmail))
+    return res.status(400).json({ error: 'Enter a valid email address.' });
+  if (newEmail) config.email = newEmail;
+  if (newPassword) config.passwordHash = bcrypt.hashSync(newPassword, 10);
+  saveConfig();
+  req.session.user = config.email;
+  res.json({ ok: true });
+});
 
 // Library listing
 app.get('/api/videos', requireAuth, (req, res) => {
