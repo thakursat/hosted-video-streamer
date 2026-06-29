@@ -382,6 +382,37 @@ function fetchPlaylistMeta(url) {
   });
 }
 
+// Full flat playlist listing — every entry (index, title, duration, thumbnail)
+// so the UI can show what's in a playlist before downloading.
+function fetchPlaylistEntries(url) {
+  return new Promise((resolve) => {
+    execFile('yt-dlp', ['-J', '--flat-playlist', '--yes-playlist', '--no-warnings', '--no-progress', ...ytNet(), url],
+      { maxBuffer: 192 * 1024 * 1024, timeout: 90000 }, (err, stdout, stderr) => {
+        if (err) {
+          const msg = ((stderr || err.message || '').split('\n').filter(Boolean).pop() || 'Could not read playlist.')
+            .replace(/^ERROR:\s*/, '').slice(0, 300);
+          return resolve({ error: msg });
+        }
+        try {
+          const j = JSON.parse(stdout);
+          const arr = Array.isArray(j.entries) ? j.entries : [];
+          const entries = arr.slice(0, 1000).map((e, i) => {
+            let thumb = e.thumbnail || '';
+            if (!thumb && Array.isArray(e.thumbnails) && e.thumbnails.length) thumb = e.thumbnails[e.thumbnails.length - 1].url || '';
+            return {
+              index: e.playlist_index || (i + 1),
+              id: e.id || '',
+              title: e.title || e.url || ('Item ' + (i + 1)),
+              duration: Math.round(e.duration || 0),
+              thumb
+            };
+          });
+          resolve({ title: j.title || j.playlist_title || 'Playlist', count: entries.length, entries });
+        } catch { resolve({ error: 'Could not parse the playlist response.' }); }
+      });
+  });
+}
+
 function emit(jobId) {
   const job = downloads.get(jobId);
   if (!job) return;
@@ -416,8 +447,9 @@ function fetchMeta(url) {
   });
 }
 
-function startDownload(url, { folder = '', playlist = false } = {}) {
+function startDownload(url, { folder = '', playlist = false, items = null } = {}) {
   const id = randToken(8);
+  const selItems = Array.isArray(items) ? items.filter(n => Number.isInteger(n) && n > 0) : null;
   // Resolve the destination folder (created if missing); default = media root.
   const destAbs = safePath(folder) || MEDIA_ROOT;
   fs.mkdirSync(destAbs, { recursive: true });
@@ -439,11 +471,15 @@ function startDownload(url, { folder = '', playlist = false } = {}) {
   };
   downloads.set(id, job);
 
+  if (selItems && selItems.length) job.playlistCount = selItems.length;
+
   // Probe metadata in the background and stream it to the UI.
   if (playlist) {
     fetchPlaylistMeta(url).then(meta => {
       if (!meta || ['cancelled', 'done', 'error'].includes(job.status)) return;
-      job.title = meta.title; job.playlistCount = meta.count || 0; emit(id);
+      job.title = meta.title;
+      if (!selItems) job.playlistCount = meta.count || 0;
+      emit(id);
     });
   } else {
     fetchMeta(url).then(meta => {
@@ -468,6 +504,10 @@ function startDownload(url, { folder = '', playlist = false } = {}) {
     'PROG|%(progress.status)s|%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.total_bytes_estimate)s|%(progress.speed)s|%(progress.eta)s',
     url
   ];
+  // Download only the chosen playlist items (one by one), in order.
+  if (playlist && selItems && selItems.length) {
+    args.splice(args.length - 1, 0, '--playlist-items', selItems.join(','));
+  }
 
   let proc;
   try {
@@ -843,8 +883,16 @@ app.post('/api/download', requireAuth, (req, res) => {
   const folder = String(req.body?.folder || '').replace(/^[/\\]+/, '');
   if (folder && !safePath(folder)) return res.status(400).json({ error: 'Invalid destination folder.' });
   const playlist = !!req.body?.playlist;
-  const job = startDownload(url, { folder, playlist });
+  const items = Array.isArray(req.body?.items) ? req.body.items.map(Number) : null;
+  const job = startDownload(url, { folder, playlist, items });
   res.json({ id: job.id, status: job.status });
+});
+
+// Preview a playlist's contents (flat) before downloading.
+app.post('/api/playlist/probe', requireAuth, async (req, res) => {
+  const url = (req.body?.url || '').trim();
+  if (!/^https?:\/\//i.test(url)) return res.status(400).json({ error: 'Paste a valid http(s) link.' });
+  res.json(await fetchPlaylistEntries(url));
 });
 
 app.get('/api/downloads', requireAuth, (req, res) => {

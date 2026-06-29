@@ -188,6 +188,22 @@
   .dl-check { display: flex; align-items: center; gap: 9px; margin-top: 14px; font-size: .86rem; color: var(--muted); cursor: pointer; }
   .dl-check input { width: 16px; height: 16px; accent-color: var(--accent); }
 
+  /* Playlist preview */
+  .pl-preview { margin-top: 14px; }
+  .pl-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+  .pl-head .ptitle2 { font-size: .86rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pl-head .btn { padding: 5px 10px; font-size: .76rem; }
+  .pl-list { max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px;
+    border: 1px solid var(--line); border-radius: 10px; padding: 8px; background: #0e0f13; }
+  .pl-item { display: flex; align-items: center; gap: 10px; padding: 6px; border-radius: 8px; cursor: pointer; }
+  .pl-item:hover { background: var(--panel-3); }
+  .pl-item input { width: 16px; height: 16px; accent-color: var(--accent); flex: 0 0 auto; }
+  .pl-item .pthumb { width: 64px; height: 36px; border-radius: 5px; object-fit: cover; background: #16181d; flex: 0 0 auto; }
+  .pl-item .pmeta { flex: 1; min-width: 0; }
+  .pl-item .pt { font-size: .82rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pl-item .pd { font-size: .7rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .pl-spin { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: .85rem; margin-top: 14px; }
+
   /* Base icon button (used by modal close buttons + player overlay) */
   .iconbtn { background: rgba(255,255,255,.08); border: none; color: var(--text);
     width: 40px; height: 40px; border-radius: 50%; cursor: pointer;
@@ -412,8 +428,17 @@
       </div>
       <label class="fld-label" for="dlFolder" style="margin-top:14px">Save to folder</label>
       <select class="fld-select" id="dlFolder"></select>
-      <label class="dl-check"><input type="checkbox" id="dlPlaylist"> Download entire playlist (into its own subfolder)</label>
+      <label class="dl-check"><input type="checkbox" id="dlPlaylist"> Download a playlist (preview its videos first)</label>
       <div class="dl-err" id="dlErr"></div>
+      <div class="pl-spin" id="plSpin" style="display:none"><span class="dl-dock-spin"></span> Reading playlist…</div>
+      <div class="pl-preview" id="plPreview" style="display:none">
+        <div class="pl-head">
+          <span class="ptitle2" id="plTitle"></span>
+          <button class="btn" id="plAll">Select all</button>
+        </div>
+        <div class="pl-list" id="plList"></div>
+        <button class="btn btn-primary" id="plGo" style="width:100%;margin-top:12px">Download selected</button>
+      </div>
       <div class="dl-list" id="dlList"></div>
     </div>
   </div>
@@ -935,10 +960,20 @@ function fmtDur(s) {
 
 const dlFolder = document.getElementById('dlFolder');
 const dlPlaylist = document.getElementById('dlPlaylist');
+const dlStartBtn = document.getElementById('dlStart');
+const plSpin = document.getElementById('plSpin');
+const plPreview = document.getElementById('plPreview');
+const plList = document.getElementById('plList');
+let plEntries = [];
+
+function resetPreview() { plPreview.style.display = 'none'; plSpin.style.display = 'none'; plList.innerHTML = ''; plEntries = []; }
+function syncDlBtn() { dlStartBtn.textContent = dlPlaylist.checked ? 'Preview playlist' : 'Download'; }
+
 function openModal() {
   dlModal.classList.add('open'); dlBackdrop.classList.add('open');
   // Populate the destination folder list; default to the folder in view.
   dlFolder.innerHTML = flatFolders().map(f => `<option value="${escapeHtml(f.path)}"${f.path === currentFolder ? ' selected' : ''}>${f.path === '' ? 'All videos (root)' : escapeHtml(f.label)}</option>`).join('');
+  resetPreview(); syncDlBtn();
   updateDock(); refreshDownloads();
   setTimeout(() => dlUrl.focus(), 60);
 }
@@ -953,27 +988,75 @@ window.addEventListener('keydown', e => {
   if (e.key === 'Escape' && dlModal.classList.contains('open')) hideModal();
 });
 
+// Top button: single download, or (for playlists) preview the items first.
 async function startDownload() {
   dlErr.style.display = 'none';
   const url = dlUrl.value.trim();
   if (!url) return;
+  if (dlPlaylist.checked) return previewPlaylist(url);
   const r = await fetch('/api/download', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url, folder: dlFolder.value, playlist: dlPlaylist.checked })
+    body: JSON.stringify({ url, folder: dlFolder.value, playlist: false })
   });
   const d = await r.json().catch(() => ({}));
   if (!r.ok) { dlErr.textContent = d.error || 'Could not start download.'; dlErr.style.display = 'block'; return; }
-  dlUrl.value = '';
-  upsertItem(d);
-  subscribe(d.id);
+  dlUrl.value = ''; syncDlBtn();
+  upsertItem(d); subscribe(d.id);
 }
-document.getElementById('dlStart').addEventListener('click', startDownload);
+
+async function previewPlaylist(url) {
+  resetPreview(); plSpin.style.display = 'flex';
+  let d = {};
+  try { const r = await fetch('/api/playlist/probe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) }); d = await r.json(); } catch { d = { error: 'Could not reach the server.' }; }
+  plSpin.style.display = 'none';
+  if (d.error) { dlErr.textContent = d.error; dlErr.style.display = 'block'; return; }
+  if (!d.entries || !d.entries.length) { dlErr.textContent = 'No playlist items found — this link may be a single video or the playlist is unavailable.'; dlErr.style.display = 'block'; return; }
+  plEntries = d.entries;
+  document.getElementById('plTitle').textContent = (d.title || 'Playlist') + ' · ' + d.entries.length + ' videos';
+  plList.innerHTML = d.entries.map(e => `
+    <label class="pl-item">
+      <input type="checkbox" data-i="${e.index}" checked>
+      <div class="pthumb" data-thumb="${escapeHtml(e.thumb || '')}"></div>
+      <div class="pmeta"><div class="pt">${e.index}. ${escapeHtml(e.title)}</div><div class="pd">${e.duration ? fmtDur(e.duration) : ''}</div></div>
+    </label>`).join('');
+  plList.querySelectorAll('.pthumb[data-thumb]').forEach(el => {
+    const u = el.dataset.thumb; if (!u) return;
+    const img = new Image();
+    img.onload = () => { el.style.backgroundImage = `url('${u}')`; el.style.backgroundSize = 'cover'; el.style.backgroundPosition = 'center'; };
+    img.src = u;
+  });
+  plPreview.style.display = 'block';
+}
+
+document.getElementById('plAll').addEventListener('click', () => {
+  const boxes = [...plList.querySelectorAll('input[type=checkbox]')];
+  const allOn = boxes.every(b => b.checked);
+  boxes.forEach(b => b.checked = !allOn);
+});
+
+document.getElementById('plGo').addEventListener('click', async () => {
+  dlErr.style.display = 'none';
+  const items = [...plList.querySelectorAll('input[type=checkbox]:checked')].map(b => parseInt(b.dataset.i, 10));
+  if (!items.length) { dlErr.textContent = 'Select at least one video.'; dlErr.style.display = 'block'; return; }
+  const r = await fetch('/api/download', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: dlUrl.value.trim(), folder: dlFolder.value, playlist: true, items })
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) { dlErr.textContent = d.error || 'Could not start download.'; dlErr.style.display = 'block'; return; }
+  dlUrl.value = ''; resetPreview(); syncDlBtn();
+  upsertItem(d); subscribe(d.id);
+});
+
+dlStartBtn.addEventListener('click', startDownload);
 dlUrl.addEventListener('keydown', e => { if (e.key === 'Enter') startDownload(); });
-// Auto-enable "whole playlist" when the link looks like a collection:
+dlPlaylist.addEventListener('change', () => { syncDlBtn(); if (!dlPlaylist.checked) resetPreview(); });
+// Auto-enable "playlist" when the link looks like a collection:
 // playlists/sets/albums, or a channel / model / pornstar / user page.
 dlUrl.addEventListener('input', () => {
   if (/[?&]list=|\/playlist|\/sets\/|\/album\/|\/model\/|\/pornstar\/|\/channels?\/|\/users?\/|youtube\.[^/]+\/(@|c\/|channel\/|user\/)/i.test(dlUrl.value))
     dlPlaylist.checked = true;
+  resetPreview(); syncDlBtn();
 });
 
 async function refreshDownloads() {
