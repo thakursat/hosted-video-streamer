@@ -4,22 +4,23 @@ import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import path from 'path';
 import fs from 'fs';
-import { loadConfig, loadSecrets, APP_DIR } from './config.js';
-import { rescan, buildMeta } from './services/library.js';
-import { ytDlpBin } from './services/ytdlp.js';
 import { execFile } from 'child_process';
-import authRouter from './routes/auth.js';
-import videosRouter from './routes/videos.js';
-import downloadsRouter from './routes/downloads.js';
-import batchRouter from './routes/batch.js';
-import settingsRouter from './routes/settings.js';
-import uploadRouter from './routes/upload.js';
-import { errorHandler } from './middleware/error.js';
+import { loadConfig, loadSecrets, APP_DIR, YT_DLP_LOCAL } from './config';
+import { rescan, buildMeta, findById } from './services/library';
+import { ytDlpBin } from './services/ytdlp';
+import { generateThumb } from './services/media';
+import { MIME } from './config';
+import authRouter from './routes/auth';
+import videosRouter from './routes/videos';
+import downloadsRouter from './routes/downloads';
+import batchRouter from './routes/batch';
+import settingsRouter from './routes/settings';
+import uploadRouter from './routes/upload';
+import { requireAuth } from './middleware/auth';
+import { errorHandler } from './middleware/error';
 
 declare module 'express-session' {
-  interface SessionData {
-    userId: string;
-  }
+  interface SessionData { userId: string; }
 }
 
 const config = loadConfig();
@@ -27,13 +28,13 @@ const secrets = loadSecrets();
 
 const app = express();
 
-// Security headers (relax CSP for inline scripts/styles in SPA)
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'", "'unsafe-inline'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+      fontSrc: ["'self'", 'https://fonts.gstatic.com'],
       imgSrc: ["'self'", 'data:', 'blob:', '*'],
       mediaSrc: ["'self'", 'blob:'],
       connectSrc: ["'self'"],
@@ -49,14 +50,46 @@ app.use(session({
   secret: secrets.sessionSecret,
   resave: false,
   saveUninitialized: false,
-  cookie: {
-    httpOnly: true,
-    sameSite: 'lax',
-    maxAge: 7 * 24 * 60 * 60 * 1000,
-  },
+  cookie: { httpOnly: true, sameSite: 'lax', maxAge: 7 * 24 * 60 * 60 * 1000 },
 }));
 
-// API routes
+// ── Streaming routes at root level (not under /api) ──────────────────────────
+
+app.get('/stream/:id', requireAuth, (req, res) => {
+  const video = findById(req.params["id"] as string);
+  if (!video) { res.status(404).json({ error: 'Not found' }); return; }
+  const stat = fs.statSync(video.absPath);
+  const total = stat.size;
+  const mime = MIME[video.ext] || 'video/mp4';
+  const range = req.headers.range;
+  if (range) {
+    const [s, e] = range.replace(/bytes=/, '').split('-');
+    const start = parseInt(s, 10);
+    const end = e ? parseInt(e, 10) : total - 1;
+    res.writeHead(206, {
+      'Content-Range': `bytes ${start}-${end}/${total}`,
+      'Accept-Ranges': 'bytes',
+      'Content-Length': end - start + 1,
+      'Content-Type': mime,
+    });
+    fs.createReadStream(video.absPath, { start, end }).pipe(res);
+  } else {
+    res.writeHead(200, { 'Content-Length': total, 'Content-Type': mime, 'Accept-Ranges': 'bytes' });
+    fs.createReadStream(video.absPath).pipe(res);
+  }
+});
+
+app.get('/thumb/:id', requireAuth, async (req, res) => {
+  const video = findById(req.params["id"] as string);
+  if (!video) { res.status(404).json({ error: 'Not found' }); return; }
+  try {
+    const p = await generateThumb(video.id, video.absPath, video.duration || 60);
+    res.sendFile(p);
+  } catch { res.status(500).json({ error: 'Thumbnail generation failed' }); }
+});
+
+// ── API routes ────────────────────────────────────────────────────────────────
+
 app.use('/api', authRouter);
 app.use('/api', videosRouter);
 app.use('/api', downloadsRouter);
@@ -64,23 +97,16 @@ app.use('/api', batchRouter);
 app.use('/api', settingsRouter);
 app.use('/api', uploadRouter);
 
-// Stream and thumb routes (kept at root for simplicity)
-app.use('/stream', (req, res, next) => {
-  // Forward to videos router which handles /stream/:id
-  req.url = '/stream' + req.url;
-  next();
-});
+// ── Serve React SPA ───────────────────────────────────────────────────────────
 
-// Serve React SPA from client/dist in production
 const clientDist = path.join(APP_DIR, 'client', 'dist');
 if (fs.existsSync(clientDist)) {
   app.use(express.static(clientDist));
-  app.get('*', (_req, res) => {
-    res.sendFile(path.join(clientDist, 'index.html'));
-  });
+  app.get('*', (_req, res) => res.sendFile(path.join(clientDist, 'index.html')));
 } else {
-  // Dev: React runs on its own Vite port (5173), this is just the API
-  app.get('/', (_req, res) => res.json({ status: 'StreamVault API running. Start the client with: cd client && npm run dev' }));
+  app.get('/', (_req, res) => res.json({
+    status: 'StreamVault API running — start the client: cd client && npm run dev',
+  }));
 }
 
 app.use(errorHandler);
@@ -98,24 +124,19 @@ function scheduleYtDlpUpdate(): void {
   const run = () => {
     execFile(ytDlpBin(), ['-U'], { timeout: 120000 }, (err, stdout) => {
       const line = (stdout || '').trim().split('\n').filter(Boolean).pop();
-      if (!err && line) console.log(`yt-dlp: ${line}`);
-      if (err) {
-        // Download local binary as fallback
-        const { YT_DLP_LOCAL } = require('./config.js');
-        const tmp = YT_DLP_LOCAL + '.tmp';
-        execFile('curl', ['-fsSL',
-          'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp',
-          '-o', tmp], { timeout: 120000 }, (e2) => {
-          if (e2) { console.warn('yt-dlp download failed:', e2.message.split('\n')[0]); return; }
-          try {
-            const fs2 = require('fs');
-            fs2.renameSync(tmp, YT_DLP_LOCAL);
-            fs2.chmodSync(YT_DLP_LOCAL, 0o755);
-          } catch (e3) {
-            try { require('fs').rmSync(tmp, { force: true }); } catch {}
-          }
-        });
-      }
+      if (!err) { if (line) console.log(`yt-dlp: ${line}`); return; }
+      // Fallback: download binary directly to app dir (writable by service user)
+      const tmp = YT_DLP_LOCAL + '.tmp';
+      execFile('curl', ['-fsSL',
+        'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp',
+        '-o', tmp,
+      ], { timeout: 120000 }, (e2) => {
+        if (e2) { console.warn('yt-dlp download failed:', e2.message.split('\n')[0]); return; }
+        try {
+          fs.renameSync(tmp, YT_DLP_LOCAL);
+          fs.chmodSync(YT_DLP_LOCAL, 0o755);
+        } catch { try { fs.rmSync(tmp, { force: true }); } catch {} }
+      });
     });
   };
   run();

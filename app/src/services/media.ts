@@ -2,7 +2,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs';
 import path from 'path';
-import { APP_DIR } from '../config.js';
+import { APP_DIR } from '../config';
 
 const execFileP = promisify(execFile);
 const THUMB_DIR = path.join(APP_DIR, 'thumbnails');

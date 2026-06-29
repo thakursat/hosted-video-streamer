@@ -3,11 +3,11 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import type { Response } from 'express';
-import { requireAuth } from '../middleware/auth.js';
-import { rescan, safePath, getMediaRoot } from '../services/library.js';
-import { ytNetArgs, spawnDownload, fetchMeta, netHint } from '../services/ytdlp.js';
-import { buildMeta } from '../services/library.js';
-import type { DownloadJob } from '../types.js';
+import { requireAuth } from '../middleware/auth';
+import { rescan, safePath, getMediaRoot } from '../services/library';
+import { ytNetArgs, spawnDownload, fetchMeta, netHint } from '../services/ytdlp';
+import { buildMeta } from '../services/library';
+import type { DownloadJob } from '../types';
 
 const router = Router();
 
@@ -39,7 +39,7 @@ router.get('/downloads', requireAuth, (_req, res) => {
 });
 
 router.get('/download/:id/events', requireAuth, (req, res) => {
-  const { id } = req.params;
+  const id = req.params["id"] as string;
   sseHeaders(res);
   if (!jobSubs.has(id)) jobSubs.set(id, new Set());
   jobSubs.get(id)!.add(res);
@@ -129,22 +129,22 @@ router.post('/download', requireAuth, async (req, res) => {
 });
 
 router.post('/download/:id/cancel', requireAuth, (req, res) => {
-  const job = jobs.get(req.params.id);
+  const job = jobs.get(req.params["id"] as string);
   if (!job) { res.status(404).json({ error: 'Job not found' }); return; }
   job.status = 'error';
   job.error = 'Cancelled';
-  broadcast(req.params.id, 'status', job);
+  broadcast(req.params["id"] as string, 'status', job);
   res.json({ ok: true });
 });
 
 router.post('/download/:id/dismiss', requireAuth, (req, res) => {
-  jobs.delete(req.params.id);
-  jobSubs.delete(req.params.id);
+  jobs.delete(req.params["id"] as string);
+  jobSubs.delete(req.params["id"] as string);
   res.json({ ok: true });
 });
 
 router.get('/download/:id/thumb', requireAuth, async (req, res) => {
-  const job = jobs.get(req.params.id);
+  const job = jobs.get(req.params["id"] as string);
   if (!job?.thumbUrl) { res.status(404).json({ error: 'No thumbnail' }); return; }
   try {
     const r = await fetch(job.thumbUrl);

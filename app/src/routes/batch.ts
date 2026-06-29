@@ -3,10 +3,10 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import type { Response } from 'express';
-import { requireAuth } from '../middleware/auth.js';
-import { rescan, safePath, getMediaRoot, buildMeta } from '../services/library.js';
-import { ytNetArgs, spawnDownload, fetchPlaylistEntries, netHint } from '../services/ytdlp.js';
-import type { BatchJob, BatchItem } from '../types.js';
+import { requireAuth } from '../middleware/auth';
+import { rescan, safePath, getMediaRoot, buildMeta } from '../services/library';
+import { ytNetArgs, spawnDownload, fetchPlaylistEntries, netHint } from '../services/ytdlp';
+import type { BatchJob, BatchItem } from '../types';
 
 const router = Router();
 const batches = new Map<string, BatchJob>();
@@ -147,7 +147,7 @@ router.post('/playlist/download', requireAuth, (req, res) => {
 });
 
 router.get('/batch/:id/events', requireAuth, (req, res) => {
-  const b = batches.get(req.params.id);
+  const b = batches.get(req.params["id"] as string);
   sseHeaders(res);
   if (!b) { res.write('event: error\ndata: {"error":"Not found"}\n\n'); res.end(); return; }
   b._subs?.add(res);
@@ -166,7 +166,7 @@ router.get('/batches', requireAuth, (_req, res) => {
 });
 
 router.post('/batch/:id/pause', requireAuth, (req, res) => {
-  const b = batches.get(req.params.id);
+  const b = batches.get(req.params["id"] as string);
   if (!b) { res.status(404).json({ error: 'Not found' }); return; }
   b.paused = true;
   b._proc?.kill('SIGTERM');
@@ -175,7 +175,7 @@ router.post('/batch/:id/pause', requireAuth, (req, res) => {
 });
 
 router.post('/batch/:id/resume', requireAuth, (req, res) => {
-  const b = batches.get(req.params.id);
+  const b = batches.get(req.params["id"] as string);
   if (!b) { res.status(404).json({ error: 'Not found' }); return; }
   b.paused = false;
   if (b.status === 'paused') { b.status = 'running'; runBatch(b); }
@@ -184,7 +184,7 @@ router.post('/batch/:id/resume', requireAuth, (req, res) => {
 });
 
 router.post('/batch/:id/stop', requireAuth, (req, res) => {
-  const b = batches.get(req.params.id);
+  const b = batches.get(req.params["id"] as string);
   if (!b) { res.status(404).json({ error: 'Not found' }); return; }
   b._stopReq = true;
   b._proc?.kill('SIGKILL');
@@ -192,16 +192,16 @@ router.post('/batch/:id/stop', requireAuth, (req, res) => {
 });
 
 router.post('/batch/:id/skip/:index', requireAuth, (req, res) => {
-  const b = batches.get(req.params.id);
+  const b = batches.get(req.params["id"] as string);
   if (!b) { res.status(404).json({ error: 'Not found' }); return; }
-  const idx = parseInt(req.params.index, 10);
+  const idx = parseInt(req.params["index"] as string, 10);
   const item = b.items.find(i => i.index === idx);
   if (item) { item.status = 'skipped'; b._proc?.kill('SIGTERM'); }
   res.json({ ok: true });
 });
 
 router.post('/batch/:id/dismiss', requireAuth, (req, res) => {
-  batches.delete(req.params.id);
+  batches.delete(req.params["id"] as string);
   res.json({ ok: true });
 });
 

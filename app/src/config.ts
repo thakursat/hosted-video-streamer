@@ -1,9 +1,9 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import type { AppConfig } from './types.js';
+import type { AppConfig } from './types';
 
-export const APP_DIR = __dirname.replace('/dist', '');
+export const APP_DIR = path.resolve(__dirname, '..');
 export const CONFIG_PATH = path.join(APP_DIR, 'config.json');
 export const SECRETS_PATH = path.join(APP_DIR, 'secrets.json');
 export const COOKIES_PATH = path.join(APP_DIR, 'cookies.txt');

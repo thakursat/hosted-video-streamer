@@ -1,9 +1,9 @@
 import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
-import { requireAuth } from '../middleware/auth.js';
-import { rescan, safePath, getMediaRoot, buildMeta } from '../services/library.js';
-import { VIDEO_EXTENSIONS } from '../config.js';
+import { requireAuth } from '../middleware/auth';
+import { rescan, safePath, getMediaRoot, buildMeta } from '../services/library';
+import { VIDEO_EXTENSIONS } from '../config';
 
 const router = Router();
 

@@ -2,8 +2,8 @@ import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs';
 import path from 'path';
-import { getProxy, COOKIES_PATH, YT_DLP_LOCAL } from '../config.js';
-import type { PlaylistProbeResult, PlaylistEntry, YtDlpVersionInfo } from '../types.js';
+import { getProxy, COOKIES_PATH, YT_DLP_LOCAL } from '../config';
+import type { PlaylistProbeResult, PlaylistEntry, YtDlpVersionInfo } from '../types';
 
 const execFileP = promisify(execFile);
 

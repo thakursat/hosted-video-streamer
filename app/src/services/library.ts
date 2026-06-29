@@ -3,14 +3,13 @@ import path from 'path';
 import crypto from 'crypto';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { getConfig, VIDEO_EXTENSIONS } from '../config.js';
-import type { VideoItem, FolderTree } from '../types.js';
+import { getConfig, VIDEO_EXTENSIONS } from '../config';
+import type { VideoItem, FolderTree } from '../types';
 
 const execFileP = promisify(execFile);
 
 let library: VideoItem[] = [];
 let metaCache: Record<string, Partial<VideoItem>> = {};
-let metaCachePath = '';
 
 export function getLibrary(): VideoItem[] {
   return library;
@@ -20,26 +19,19 @@ export function getMediaRoot(): string {
   return getConfig().mediaDir;
 }
 
-function getMetaCachePath(): string {
-  if (!metaCachePath) {
-    const { APP_DIR } = require('../config.js');
-    metaCachePath = path.join(APP_DIR, 'meta-cache.json');
-  }
-  return metaCachePath;
+function metaCachePath(): string {
+  return path.join(path.dirname(getMediaRoot()), 'meta-cache.json');
 }
 
 function loadMetaCache(): void {
   try {
-    const p = path.join(path.dirname(getMediaRoot()), 'meta-cache.json');
+    const p = metaCachePath();
     if (fs.existsSync(p)) metaCache = JSON.parse(fs.readFileSync(p, 'utf8'));
   } catch {}
 }
 
 function saveMetaCache(): void {
-  try {
-    const p = path.join(path.dirname(getMediaRoot()), 'meta-cache.json');
-    fs.writeFileSync(p, JSON.stringify(metaCache));
-  } catch {}
+  try { fs.writeFileSync(metaCachePath(), JSON.stringify(metaCache)); } catch {}
 }
 
 export function makeVideoId(relPath: string): string {

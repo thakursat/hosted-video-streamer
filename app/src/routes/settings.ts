@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { requireAuth } from '../middleware/auth.js';
-import { getConfig, saveConfig } from '../config.js';
-import { getYtDlpVersion, updateYtDlp } from '../services/ytdlp.js';
+import { requireAuth } from '../middleware/auth';
+import { getConfig, saveConfig } from '../config';
+import { getYtDlpVersion, updateYtDlp } from '../services/ytdlp';
 
 const router = Router();
 
