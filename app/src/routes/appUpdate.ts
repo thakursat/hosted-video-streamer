@@ -17,6 +17,7 @@ function sseLog(res: Response, msg: string, type: 'log' | 'error' | 'done' = 'lo
 function runStep(cmd: string, args: string[], cwd: string, res: Response): Promise<void> {
   return new Promise((resolve, reject) => {
     const proc = spawn(cmd, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    proc.on('error', reject);
     proc.stdout.on('data', (d: Buffer) => {
       for (const line of d.toString().split('\n')) {
         if (line.trim()) sseLog(res, line.trim());
@@ -48,6 +49,8 @@ router.get('/app/update/stream', requireAuth, async (req, res) => {
   const tarPath = '/tmp/sv-update.tar.gz';
   const updateUrl = getConfig().updateUrl ||
     'https://raw.githubusercontent.com/thakursat/hosted-video-streamer/main/streamvault-app.tar.gz';
+
+  try { await runStep('apt-get', ['install', '-y', '--no-install-recommends', 'sudo'], '/', res); } catch {}
 
   try {
     log(`► Downloading latest release from GitHub...`);
@@ -114,6 +117,7 @@ router.get('/app/update/stream', requireAuth, async (req, res) => {
     }, 2000);
   } catch (err: any) {
     sseLog(res, `✗ ${err.message}`, 'error');
+  } finally {
     _updating = false;
   }
 });
