@@ -13,11 +13,10 @@ if ! command -v node >/dev/null 2>&1; then
   curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
   apt-get install -y nodejs
 fi
-# yt-dlp: install the standalone binary (self-updating, no pip needed)
-if ! command -v yt-dlp >/dev/null 2>&1; then
-  curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
-  chmod a+rx /usr/local/bin/yt-dlp
-fi
+# yt-dlp: always pull the latest standalone binary so re-running the script
+# upgrades an existing installation instead of skipping it.
+curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
+chmod a+rx /usr/local/bin/yt-dlp
 echo "    node $(node --version), ffmpeg $(ffmpeg -version | head -1 | awk '{print $3}'), yt-dlp $(yt-dlp --version)"
 
 # Keep yt-dlp current — a stale binary throws "HTTP Error 410: Gone".
