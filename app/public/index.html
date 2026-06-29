@@ -459,6 +459,16 @@
         <div class="pl-list" id="plList"></div>
         <button class="btn btn-primary" id="plGo" style="width:100%;margin-top:12px">Download selected</button>
       </div>
+      <hr style="border:none;border-top:1px solid var(--line);margin:18px 0 14px">
+      <p class="dl-hint" style="margin:0 0 10px">Or upload a file from this device (useful when the server's network blocks the source site).</p>
+      <div id="ulZone" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <input type="file" id="ulFile" accept="video/*,.mkv,.avi,.flv,.wmv,.m2ts,.ts" style="display:none">
+        <button class="btn" id="ulPick">Choose file…</button>
+        <span id="ulName" style="font-size:.82rem;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0"></span>
+        <button class="btn btn-primary" id="ulStart" style="display:none">Upload</button>
+      </div>
+      <div class="dl-bar" id="ulBar" style="display:none;margin-top:10px"><div class="fill" id="ulFill"></div></div>
+      <div id="ulStat" style="font-size:.78rem;color:var(--muted);margin-top:5px;font-variant-numeric:tabular-nums"></div>
       <div class="dl-list" id="dlList"></div>
     </div>
   </div>
@@ -1155,6 +1165,59 @@ dlUrl.addEventListener('input', () => {
   if (/[?&]list=|\/playlist|\/sets\/|\/album\/|\/model\/|\/pornstar\/|\/channels?\/|\/users?\/|youtube\.[^/]+\/(@|c\/|channel\/|user\/)/i.test(dlUrl.value))
     dlPlaylist.checked = true;
   resetPreview(); syncDlBtn();
+});
+
+// ---- Upload from device ----
+const ulFile = document.getElementById('ulFile');
+const ulPick = document.getElementById('ulPick');
+const ulName = document.getElementById('ulName');
+const ulStart = document.getElementById('ulStart');
+const ulBar = document.getElementById('ulBar');
+const ulFill = document.getElementById('ulFill');
+const ulStat = document.getElementById('ulStat');
+
+ulPick.addEventListener('click', () => ulFile.click());
+ulFile.addEventListener('change', () => {
+  const f = ulFile.files[0];
+  if (!f) return;
+  ulName.textContent = f.name;
+  ulStart.style.display = '';
+  ulStat.textContent = '';
+  ulBar.style.display = 'none';
+  dlErr.style.display = 'none';
+});
+ulStart.addEventListener('click', () => {
+  const f = ulFile.files[0]; if (!f) return;
+  ulStart.disabled = true;
+  ulBar.style.display = ''; ulFill.style.width = '0%';
+  ulStat.textContent = 'Uploading…'; dlErr.style.display = 'none';
+  const xhr = new XMLHttpRequest();
+  const url = '/api/upload?folder=' + encodeURIComponent(dlFolder.value) + '&filename=' + encodeURIComponent(f.name);
+  xhr.open('PUT', url);
+  xhr.upload.onprogress = (e) => {
+    if (!e.lengthComputable) return;
+    const pct = (e.loaded / e.total * 100).toFixed(0);
+    ulFill.style.width = pct + '%';
+    ulStat.textContent = humanSize(e.loaded) + ' / ' + humanSize(e.total) + ' · ' + pct + '%';
+  };
+  xhr.onload = () => {
+    ulStart.disabled = false;
+    if (xhr.status === 200) {
+      ulFill.style.width = '100%';
+      ulStat.textContent = 'Done — file added to your library.';
+      ulFile.value = ''; ulName.textContent = ''; ulStart.style.display = 'none';
+      load();
+    } else {
+      ulBar.style.display = 'none'; ulStat.textContent = '';
+      try { dlErr.textContent = JSON.parse(xhr.responseText).error || 'Upload failed.'; } catch { dlErr.textContent = 'Upload failed.'; }
+      dlErr.style.display = 'block';
+    }
+  };
+  xhr.onerror = () => {
+    ulStart.disabled = false; ulBar.style.display = 'none'; ulStat.textContent = '';
+    dlErr.textContent = 'Upload failed (network error).'; dlErr.style.display = 'block';
+  };
+  xhr.send(f);
 });
 
 async function refreshDownloads() {

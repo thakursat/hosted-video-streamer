@@ -886,6 +886,28 @@ app.post('/api/settings', requireAuth, (req, res) => {
   res.json({ ok: true, proxy });
 });
 
+// Upload a video file directly from the client into the library.
+// Uses raw body streaming — no multipart parser or new dependency needed.
+app.put('/api/upload', requireAuth, (req, res) => {
+  const folder = String(req.query.folder || '').replace(/^[/\\]+/, '');
+  const rawName = basename(String(req.query.filename || '').trim());
+  if (!rawName || rawName.startsWith('.'))
+    return res.status(400).json({ error: 'Invalid filename.' });
+  const ext = extname(rawName).toLowerCase();
+  if (!VIDEO_EXT.has(ext))
+    return res.status(400).json({ error: 'Unsupported file type. Supported: ' + [...VIDEO_EXT].join(', ') });
+  const destAbs = safePath(folder) || MEDIA_ROOT;
+  try { fs.mkdirSync(destAbs, { recursive: true }); } catch {}
+  const destFile = join(destAbs, rawName);
+  if (fs.existsSync(destFile))
+    return res.status(409).json({ error: 'A file with that name already exists.' });
+  const ws = fs.createWriteStream(destFile);
+  req.pipe(ws);
+  ws.on('finish', () => { rescan(); buildMeta().catch(() => {}); res.json({ ok: true }); });
+  ws.on('error', (e) => { try { fs.rmSync(destFile, { force: true }); } catch {} res.status(500).json({ error: 'Write failed: ' + e.message }); });
+  req.on('error', () => { ws.destroy(); try { fs.rmSync(destFile, { force: true }); } catch {} });
+});
+
 // Library listing — scoped to a folder (default root), optionally recursive.
 app.get('/api/videos', requireAuth, (req, res) => {
   const folder = String(req.query.folder || '').replace(/^[/\\]+/, '');
