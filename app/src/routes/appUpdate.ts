@@ -14,9 +14,21 @@ function sseLog(res: Response, msg: string, type: 'log' | 'error' | 'done' = 'lo
   try { res.write(`event: ${type}\ndata: ${JSON.stringify({ msg })}\n\n`); } catch {}
 }
 
+// npm writes logs/cache to $HOME — the streamvault service user's home dir may
+// not have a writable .npm directory, causing exit code 243. Point npm at /tmp.
+const NPM_ENV = {
+  ...process.env,
+  HOME: '/tmp',
+  npm_config_cache: '/tmp/.npm-sv',
+  npm_config_fund: 'false',
+  npm_config_audit: 'false',
+  npm_config_update_notifier: 'false',
+};
+
 function runStep(cmd: string, args: string[], cwd: string, res: Response): Promise<void> {
   return new Promise((resolve, reject) => {
-    const proc = spawn(cmd, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    const env = cmd === 'npm' ? NPM_ENV : process.env;
+    const proc = spawn(cmd, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], env });
     proc.on('error', reject);
     proc.stdout.on('data', (d: Buffer) => {
       for (const line of d.toString().split('\n')) {
@@ -82,7 +94,7 @@ router.get('/app/update/stream', requireAuth, async (req, res) => {
     }
 
     log(`► Installing server dependencies...`);
-    await runStep('npm', ['install'], APP_DIR, res);
+    await runStep('npm', ['install', '--no-fund', '--no-audit', '--loglevel=error'], APP_DIR, res);
     log(`✓ Server deps installed`);
 
     log(`► Building server (TypeScript)...`);
@@ -91,7 +103,7 @@ router.get('/app/update/stream', requireAuth, async (req, res) => {
 
     if (fs.existsSync(clientDir)) {
       log(`► Installing client dependencies...`);
-      await runStep('npm', ['install'], clientDir, res);
+      await runStep('npm', ['install', '--no-fund', '--no-audit', '--loglevel=error'], clientDir, res);
       log(`✓ Client deps installed`);
 
       log(`► Building client (React/Vite)...`);
@@ -104,7 +116,7 @@ router.get('/app/update/stream', requireAuth, async (req, res) => {
     }
 
     log(`► Pruning dev dependencies...`);
-    await runStep('npm', ['prune', '--production'], APP_DIR, res);
+    await runStep('npm', ['prune', '--production', '--no-fund', '--loglevel=error'], APP_DIR, res);
     log(`✓ Pruned`);
 
     sseLog(res, 'Update complete — restarting service in 2 seconds…', 'done');
