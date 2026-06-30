@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Play, MoreVertical, Pencil, Trash2, Move, Download, Check } from 'lucide-react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { Play, MoreVertical, Pencil, Trash2, Move, Download, Check, Film, X } from 'lucide-react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { formatBytes, formatDuration, cn } from '@/lib/utils';
 import type { Video } from '@/types';
@@ -8,6 +8,9 @@ import type { Video } from '@/types';
 const SPRITE_COLS = 5;
 const SPRITE_ROWS = 5;
 const SPRITE_TOTAL = SPRITE_COLS * SPRITE_ROWS;
+
+// 25 frames over ~4 s
+const FRAME_MS = 160;
 
 interface VideoCardProps {
   video: Video;
@@ -20,23 +23,92 @@ interface VideoCardProps {
 }
 
 export function VideoCard({ video, onPlay, onRename, onDelete, onMove, selected, onToggleSelect }: VideoCardProps) {
-  const [thumbErr, setThumbErr] = useState(false);
-  const [hoverX, setHoverX] = useState<number | null>(null);
+  const [thumbErr, setThumbErr]       = useState(false);
+  const [hoverX, setHoverX]           = useState<number | null>(null);
   const [spriteLoaded, setSpriteLoaded] = useState(false);
+  const [playing, setPlaying]         = useState(false);
+  const [frameIdx, setFrameIdx]       = useState(0);
+
+  const cardRef      = useRef<HTMLDivElement>(null);
+  const intervalRef  = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isPlayRef    = useRef(false);
+  const spriteOkRef  = useRef(false);
+  // kept in sync with latest callbacks so IntersectionObserver closure is stable
+  const startRef     = useRef<() => void>(() => {});
+  const stopRef      = useRef<() => void>(() => {});
 
   const spriteUrl = `/api/videos/${video.id}/sprite.jpg`;
 
-  // Which frame to show, 0-based
-  const frameIdx = hoverX !== null
-    ? Math.min(SPRITE_TOTAL - 1, Math.floor(hoverX * SPRITE_TOTAL))
-    : 0;
-  const col = frameIdx % SPRITE_COLS;
-  const row = Math.floor(frameIdx / SPRITE_COLS);
-  // background-position % formula: n / (max-1) * 100
-  const bgX = (col / (SPRITE_COLS - 1)) * 100;
-  const bgY = (row / (SPRITE_ROWS - 1)) * 100;
-  const frameSecs = video.duration ? frameIdx * (video.duration / SPRITE_TOTAL) : null;
-  const showSprite = hoverX !== null && spriteLoaded;
+  // Frame index to display — animated frames win over hover-scrub
+  const activeIdx = playing
+    ? frameIdx
+    : hoverX !== null
+      ? Math.min(SPRITE_TOTAL - 1, Math.floor(hoverX * SPRITE_TOTAL))
+      : 0;
+
+  const col  = activeIdx % SPRITE_COLS;
+  const row  = Math.floor(activeIdx / SPRITE_COLS);
+  const bgX  = (col / (SPRITE_COLS - 1)) * 100;
+  const bgY  = (row / (SPRITE_ROWS - 1)) * 100;
+  const frameSecs   = video.duration ? activeIdx * (video.duration / SPRITE_TOTAL) : null;
+  const showSprite  = (hoverX !== null || playing) && spriteLoaded;
+  const barProgress = playing ? (frameIdx / (SPRITE_TOTAL - 1)) * 100 : (hoverX ?? 0) * 100;
+
+  const loadSprite = useCallback(() => {
+    if (spriteOkRef.current) return;
+    const img = new Image();
+    img.onload = () => { spriteOkRef.current = true; setSpriteLoaded(true); };
+    img.src = spriteUrl;
+  }, [spriteUrl]);
+
+  const startAnimation = useCallback(() => {
+    if (isPlayRef.current) return;
+    loadSprite();
+    isPlayRef.current = true;
+    setPlaying(true);
+    setFrameIdx(0);
+    let f = 0;
+    intervalRef.current = setInterval(() => {
+      f++;
+      if (f >= SPRITE_TOTAL) {
+        clearInterval(intervalRef.current!);
+        intervalRef.current = null;
+        isPlayRef.current = false;
+        setPlaying(false);
+        setFrameIdx(0);
+        return;
+      }
+      setFrameIdx(f);
+    }, FRAME_MS);
+  }, [loadSprite]);
+
+  const stopAnimation = useCallback(() => {
+    if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
+    isPlayRef.current = false;
+    setPlaying(false);
+    setFrameIdx(0);
+  }, []);
+
+  // Keep refs current so the IntersectionObserver closure is always up-to-date
+  startRef.current = startAnimation;
+  stopRef.current  = stopAnimation;
+
+  // Cleanup on unmount
+  useEffect(() => () => { if (intervalRef.current) clearInterval(intervalRef.current); }, []);
+
+  // Mobile: auto-play when card is centered in the viewport
+  useEffect(() => {
+    const el = cardRef.current;
+    if (!el) return;
+    const isTouch = window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+    if (!isTouch) return;
+    const obs = new IntersectionObserver(
+      ([entry]) => { entry.isIntersecting ? startRef.current() : stopRef.current(); },
+      { rootMargin: '-25% 0px -25% 0px', threshold: 0.5 },
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
 
   const trackHover = (e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -45,19 +117,18 @@ export function VideoCard({ video, onPlay, onRename, onDelete, onMove, selected,
 
   const onMouseEnter = (e: React.MouseEvent<HTMLDivElement>) => {
     trackHover(e);
-    if (!spriteLoaded) {
-      const img = new Image();
-      img.onload = () => setSpriteLoaded(true);
-      img.src = spriteUrl;
-    }
+    loadSprite();
   };
 
   return (
-    <div className={cn(
-      'group relative flex flex-col overflow-hidden rounded-xl border bg-surface transition-all duration-200 hover:shadow-lg hover:shadow-black/20',
-      selected ? 'border-accent ring-2 ring-accent/30' : 'border-border hover:border-accent/40',
-    )}>
-      {/* Thumbnail area */}
+    <div
+      ref={cardRef}
+      className={cn(
+        'group relative flex flex-col overflow-hidden rounded-xl border bg-surface transition-all duration-200 hover:shadow-lg hover:shadow-black/20',
+        selected ? 'border-accent ring-2 ring-accent/30' : 'border-border hover:border-accent/40',
+      )}
+    >
+      {/* Thumbnail */}
       <div
         className="relative aspect-video cursor-pointer overflow-hidden bg-elevated"
         onClick={() => onPlay(video)}
@@ -70,10 +141,7 @@ export function VideoCard({ video, onPlay, onRename, onDelete, onMove, selected,
           <img
             src={`/thumb/${video.id}`}
             alt={video.name}
-            className={cn(
-              'h-full w-full object-cover transition-opacity duration-150',
-              showSprite && 'opacity-0',
-            )}
+            className={cn('h-full w-full object-cover transition-opacity duration-150', showSprite && 'opacity-0')}
             onError={() => setThumbErr(true)}
             loading="lazy"
           />
@@ -83,7 +151,7 @@ export function VideoCard({ video, onPlay, onRename, onDelete, onMove, selected,
           </div>
         )}
 
-        {/* Sprite scrub preview */}
+        {/* Sprite frame */}
         {showSprite && (
           <div
             className="absolute inset-0"
@@ -96,24 +164,21 @@ export function VideoCard({ video, onPlay, onRename, onDelete, onMove, selected,
           />
         )}
 
-        {/* Scrub progress bar (thin, at the very bottom) */}
+        {/* Progress bar */}
         {showSprite && (
           <div className="absolute inset-x-0 bottom-0 h-0.5 bg-white/20">
-            <div
-              className="h-full bg-accent"
-              style={{ width: `${(hoverX ?? 0) * 100}%` }}
-            />
+            <div className="h-full bg-accent" style={{ width: `${barProgress}%` }} />
           </div>
         )}
 
-        {/* Current-frame timestamp (shown above the duration badge slot) */}
+        {/* Frame timestamp */}
         {showSprite && frameSecs !== null && (
           <span className="absolute bottom-2 left-1/2 -translate-x-1/2 whitespace-nowrap rounded px-1.5 py-0.5 text-xs font-semibold tabular-nums bg-black/80 text-white">
             {formatDuration(frameSecs)}
           </span>
         )}
 
-        {/* Play overlay — only when not scrubbing */}
+        {/* Play overlay (hidden while scrubbing / animating) */}
         {!showSprite && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/0 transition-colors group-hover:bg-black/30">
             <div className="flex h-11 w-11 scale-90 items-center justify-center rounded-full bg-accent/90 opacity-0 shadow-lg transition-all duration-200 group-hover:scale-100 group-hover:opacity-100">
@@ -122,7 +187,7 @@ export function VideoCard({ video, onPlay, onRename, onDelete, onMove, selected,
           </div>
         )}
 
-        {/* Selection checkbox (top-left, fades in on hover) */}
+        {/* Selection checkbox (top-left) */}
         {onToggleSelect && (
           <button
             onClick={e => { e.stopPropagation(); onToggleSelect(video); }}
@@ -137,12 +202,30 @@ export function VideoCard({ video, onPlay, onRename, onDelete, onMove, selected,
           </button>
         )}
 
-        {/* Duration badge — hidden while scrubbing (replaced by frame timestamp) */}
+        {/* Duration badge (hidden while sprite showing) */}
         {video.duration && !showSprite && (
           <span className="absolute bottom-2 right-2 rounded px-1.5 py-0.5 text-xs font-medium bg-black/70 text-white">
             {formatDuration(video.duration)}
           </span>
         )}
+
+        {/* Play Frames button (top-right)
+            Desktop: fades in on card hover
+            Mobile (hover:none devices): always visible at reduced opacity  */}
+        <button
+          onClick={e => { e.stopPropagation(); playing ? stopAnimation() : startAnimation(); }}
+          title={playing ? 'Stop preview' : 'Preview frames'}
+          className={cn(
+            'absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full backdrop-blur-sm transition-all duration-150',
+            playing
+              ? 'bg-accent text-white opacity-100 scale-100'
+              : 'bg-black/55 text-white opacity-40 scale-95 group-hover:opacity-100 group-hover:scale-100',
+          )}
+        >
+          {playing
+            ? <X className="h-3.5 w-3.5" />
+            : <Film className="h-3.5 w-3.5" />}
+        </button>
       </div>
 
       {/* Info row */}
@@ -163,10 +246,10 @@ export function VideoCard({ video, onPlay, onRename, onDelete, onMove, selected,
               align="end"
             >
               {[
-                { icon: Pencil, label: 'Rename', onClick: () => onRename(video) },
-                { icon: Move, label: 'Move', onClick: () => onMove(video) },
+                { icon: Pencil,   label: 'Rename',   onClick: () => onRename(video) },
+                { icon: Move,     label: 'Move',     onClick: () => onMove(video) },
                 { icon: Download, label: 'Download', onClick: () => { window.location.href = `/api/videos/${video.id}/download`; } },
-                { icon: Trash2, label: 'Delete', onClick: () => onDelete(video), danger: true },
+                { icon: Trash2,   label: 'Delete',   onClick: () => onDelete(video), danger: true },
               ].map(({ icon: Icon, label, onClick, danger }) => (
                 <DropdownMenu.Item
                   key={label}
