@@ -1,7 +1,8 @@
 import { useState, useMemo, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Film, Search, Move, Trash2, X, Shuffle } from 'lucide-react';
+import { Film, Search, Move, Trash2, X, Shuffle, FolderOpen, Plus, Download, Settings } from 'lucide-react';
 import { Header } from '@/components/Header';
 import { Sidebar } from '@/components/Sidebar';
 import { VideoCard } from '@/components/VideoCard';
@@ -9,7 +10,6 @@ import { Player } from '@/components/Player';
 import { AddVideosModal } from '@/components/AddVideosModal';
 import { DownloadsTray } from '@/components/DownloadsTray';
 import { StatsModal } from '@/components/StatsModal';
-import { AccountModal } from '@/components/AccountModal';
 import { RenameModal } from '@/components/RenameModal';
 import { ConfirmModal } from '@/components/ConfirmModal';
 import { MoveModal } from '@/components/MoveModal';
@@ -17,6 +17,7 @@ import { videosApi } from '@/api/videos';
 import { downloadsApi } from '@/api/downloads';
 import { usePlayerStore } from '@/stores/playerStore';
 import { useDownloadsStore } from '@/stores/downloadsStore';
+import { cn } from '@/lib/utils';
 import type { Video } from '@/types';
 
 type SortKey = 'addedAt' | 'addedAt-asc' | 'name' | 'name-desc' | 'size' | 'duration' | 'random';
@@ -28,14 +29,14 @@ function pseudoHash(id: string, seed: number): number {
 }
 
 export function Library() {
+  const navigate = useNavigate();
   const qc = useQueryClient();
   const { video: nowPlaying, open: openPlayer } = usePlayerStore();
-  const { hydrate } = useDownloadsStore();
+  const { hydrate, jobs, batches } = useDownloadsStore();
 
-  // Hydrate download state from server on mount (survives page refresh)
   useEffect(() => {
     Promise.all([downloadsApi.list(), downloadsApi.listBatches()])
-      .then(([jobs, batches]) => hydrate(jobs, batches))
+      .then(([j, b]) => hydrate(j, b))
       .catch(() => {});
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -45,7 +46,7 @@ export function Library() {
   const [shuffleSeed, setShuffleSeed] = useState(1);
   const [showAdd, setShowAdd] = useState(false);
   const [showStats, setShowStats] = useState(false);
-  const [showAccount, setShowAccount] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   // Bulk selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -56,7 +57,7 @@ export function Library() {
   const [deleteVideos, setDeleteVideos] = useState<Video[]>([]);
   const [moveVideos, setMoveVideos] = useState<Video[]>([]);
 
-  // Folder modals — null = closed, string = target path or parent
+  // Folder modals
   const [createFolderParent, setCreateFolderParent] = useState<string | null>(null);
   const [renameFolderPath, setRenameFolderPath] = useState<string | null>(null);
   const [deleteFolderPath, setDeleteFolderPath] = useState<string | null>(null);
@@ -128,7 +129,7 @@ export function Library() {
     else if (sort === 'duration') arr.sort((a, b) => (b.duration || 0) - (a.duration || 0));
     else if (sort === 'addedAt-asc') arr.sort((a, b) => a.addedAt - b.addedAt);
     else if (sort === 'random') arr.sort((a, b) => pseudoHash(a.id, shuffleSeed) - pseudoHash(b.id, shuffleSeed));
-    else arr.sort((a, b) => b.addedAt - a.addedAt); // addedAt (newest first)
+    else arr.sort((a, b) => b.addedAt - a.addedAt);
     return arr;
   }, [videos, search, sort, shuffleSeed]);
 
@@ -143,12 +144,39 @@ export function Library() {
 
   const folderDisplayName = (path: string) => path.split('/').pop() || 'root';
 
+  // Active download count for bottom nav badge
+  const activeDownloads = jobs.filter(j => !['done', 'error'].includes(j.status)).length
+    + batches.filter(b => !['done', 'stopped', 'error'].includes(b.status)).length;
+
+  const bottomNavItems = [
+    {
+      icon: FolderOpen,
+      label: 'Folders',
+      onClick: () => setMobileSidebarOpen(true),
+    },
+    {
+      icon: Plus,
+      label: 'Add',
+      onClick: () => setShowAdd(true),
+    },
+    {
+      icon: Download,
+      label: 'Downloads',
+      onClick: () => setShowAdd(true),
+      badge: activeDownloads,
+    },
+    {
+      icon: Settings,
+      label: 'Settings',
+      onClick: () => navigate('/settings'),
+    },
+  ];
+
   return (
     <div className="flex h-screen flex-col overflow-hidden">
       <Header
         onAddVideos={() => setShowAdd(true)}
         onStats={() => setShowStats(true)}
-        onAccount={() => setShowAccount(true)}
         videoCount={videos.length}
         search={search}
         onSearch={setSearch}
@@ -157,15 +185,18 @@ export function Library() {
       <div className="flex flex-1 overflow-hidden">
         <Sidebar
           selected={folder}
-          onSelect={setFolder}
+          onSelect={f => { setFolder(f); setMobileSidebarOpen(false); }}
           onCreateFolder={parent => setCreateFolderParent(parent)}
           onRenameFolder={f => setRenameFolderPath(f)}
           onDeleteFolder={f => setDeleteFolderPath(f)}
           onMoveFolder={f => setMoveFolderPath(f)}
+          mobileOpen={mobileSidebarOpen}
+          onMobileClose={() => setMobileSidebarOpen(false)}
         />
 
         <main className="flex-1 overflow-y-auto">
-          <div className="p-4 sm:p-6">
+          {/* Extra bottom padding on mobile to clear the bottom nav */}
+          <div className="p-4 sm:p-6 pb-24 lg:pb-6">
             {/* Toolbar */}
             <div className="mb-4 flex items-center justify-between gap-3">
               <div className="flex items-center gap-2">
@@ -280,12 +311,37 @@ export function Library() {
         </main>
       </div>
 
+      {/* ── Mobile bottom nav ──────────────────────────────────────────── */}
+      <nav
+        className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-surface/95 backdrop-blur-md lg:hidden"
+        style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
+      >
+        <div className="flex h-16 items-center justify-around px-2">
+          {bottomNavItems.map(({ icon: Icon, label, onClick, badge }) => (
+            <button
+              key={label}
+              onClick={onClick}
+              className="flex flex-col items-center gap-1 rounded-xl px-4 py-2 text-text-muted transition-colors hover:text-text-primary active:bg-elevated"
+            >
+              <div className="relative">
+                <Icon className="h-5 w-5" />
+                {badge != null && badge > 0 && (
+                  <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-accent text-[9px] font-bold text-white">
+                    {badge > 9 ? '9+' : badge}
+                  </span>
+                )}
+              </div>
+              <span className="text-[10px] font-medium leading-none">{label}</span>
+            </button>
+          ))}
+        </div>
+      </nav>
+
       {/* ── Overlays ─────────────────────────────────────────────────────── */}
       {nowPlaying && <Player />}
       <AddVideosModal open={showAdd} onClose={() => setShowAdd(false)} currentFolder={folder} />
       {!showAdd && <DownloadsTray onOpenModal={() => setShowAdd(true)} />}
       <StatsModal open={showStats} onClose={() => setShowStats(false)} />
-      <AccountModal open={showAccount} onClose={() => setShowAccount(false)} />
 
       {/* Video rename */}
       <RenameModal

@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Folder, FolderOpen, ChevronRight, Film, Plus, Pencil, Trash2, Move } from 'lucide-react';
+import { Folder, FolderOpen, ChevronRight, Film, Plus, Pencil, Trash2, Move, X } from 'lucide-react';
 import { videosApi } from '@/api/videos';
 import { cn } from '@/lib/utils';
 import type { FolderTree } from '@/types';
@@ -16,6 +16,8 @@ interface SidebarProps {
   onRenameFolder: (folder: string) => void;
   onDeleteFolder: (folder: string) => void;
   onMoveFolder: (folder: string) => void;
+  mobileOpen?: boolean;
+  onMobileClose?: () => void;
 }
 
 interface TreeNodeProps {
@@ -117,7 +119,33 @@ function TreeNode({ node, depth, selected, onSelect, onCreateFolder, onRenameFol
   );
 }
 
-export function Sidebar({ selected, onSelect, onCreateFolder, onRenameFolder, onDeleteFolder, onMoveFolder }: SidebarProps) {
+function TreeContent({
+  tree, selected, onSelect, onCreateFolder, onRenameFolder, onDeleteFolder, onMoveFolder,
+}: Pick<SidebarProps, 'selected' | 'onSelect' | 'onCreateFolder' | 'onRenameFolder' | 'onDeleteFolder' | 'onMoveFolder'> & { tree: FolderTree | undefined }) {
+  return (
+    <div className="p-3">
+      <p className="px-2 pb-1 text-xs font-medium uppercase tracking-wider text-text-subtle">Library</p>
+      {tree ? (
+        <TreeNode
+          node={tree} depth={0} selected={selected} onSelect={onSelect}
+          onCreateFolder={onCreateFolder} onRenameFolder={onRenameFolder}
+          onDeleteFolder={onDeleteFolder} onMoveFolder={onMoveFolder}
+        />
+      ) : (
+        <div className="space-y-1">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="h-8 animate-pulse rounded-lg bg-elevated" />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function Sidebar({
+  selected, onSelect, onCreateFolder, onRenameFolder, onDeleteFolder, onMoveFolder,
+  mobileOpen, onMobileClose,
+}: SidebarProps) {
   const { data: tree } = useQuery({ queryKey: ['tree'], queryFn: videosApi.tree });
 
   const [width, setWidth] = useState(() => {
@@ -157,33 +185,50 @@ export function Sidebar({ selected, onSelect, onCreateFolder, onRenameFolder, on
     document.body.style.userSelect = 'none';
   };
 
-  return (
-    <aside
-      className="relative hidden shrink-0 flex-col overflow-y-auto border-r border-border lg:flex"
-      style={{ width }}
-    >
-      <div className="p-3">
-        <p className="px-2 pb-1 text-xs font-medium uppercase tracking-wider text-text-subtle">Library</p>
-        {tree ? (
-          <TreeNode
-            node={tree} depth={0} selected={selected} onSelect={onSelect}
-            onCreateFolder={onCreateFolder} onRenameFolder={onRenameFolder}
-            onDeleteFolder={onDeleteFolder} onMoveFolder={onMoveFolder}
-          />
-        ) : (
-          <div className="space-y-1">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="h-8 animate-pulse rounded-lg bg-elevated" />
-            ))}
-          </div>
-        )}
-      </div>
+  const treeProps = { tree, selected, onSelect, onCreateFolder, onRenameFolder, onDeleteFolder, onMoveFolder };
 
-      {/* Drag handle */}
-      <div
-        onMouseDown={onDragStart}
-        className="absolute right-0 top-0 h-full w-1 cursor-col-resize hover:bg-accent/40 active:bg-accent/60 transition-colors"
-      />
-    </aside>
+  return (
+    <>
+      {/* Desktop sidebar */}
+      <aside
+        className="relative hidden shrink-0 flex-col overflow-y-auto border-r border-border lg:flex"
+        style={{ width }}
+      >
+        <TreeContent {...treeProps} />
+        <div
+          onMouseDown={onDragStart}
+          className="absolute right-0 top-0 h-full w-1 cursor-col-resize hover:bg-accent/40 active:bg-accent/60 transition-colors"
+        />
+      </aside>
+
+      {/* Mobile drawer backdrop */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm lg:hidden"
+          onClick={onMobileClose}
+          aria-hidden
+        />
+      )}
+
+      {/* Mobile drawer */}
+      <aside
+        className={cn(
+          'fixed inset-y-0 left-0 z-50 w-72 overflow-y-auto border-r border-border bg-surface transition-transform duration-200 lg:hidden',
+          mobileOpen ? 'translate-x-0' : '-translate-x-full',
+        )}
+        style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
+      >
+        <div className="flex items-center justify-between border-b border-border px-4 py-3">
+          <p className="text-sm font-semibold text-text-primary">Library</p>
+          <button
+            onClick={onMobileClose}
+            className="rounded-lg p-1.5 text-text-muted hover:bg-elevated hover:text-text-primary transition-colors"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <TreeContent {...treeProps} />
+      </aside>
+    </>
   );
 }

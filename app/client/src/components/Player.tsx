@@ -24,6 +24,7 @@ export function Player() {
   const volBarRef = useRef<HTMLDivElement>(null);
   const hideTimer = useRef<ReturnType<typeof setTimeout>>();
   const seekingRef = useRef(false);
+  const videoIsLandscapeRef = useRef(true); // tracks whether the video file itself is wider than tall
 
   // Playback state
   const [paused, setPaused] = useState(true);
@@ -73,11 +74,59 @@ export function Player() {
     return () => { document.body.style.overflow = ''; };
   }, []);
 
-  // ── Fullscreen detection ──────────────────────────────────────────────────────
+  // ── Fullscreen detection (standard + webkit for older Android/Samsung) ────────
   useEffect(() => {
-    const onChange = () => setIsFullscreen(!!document.fullscreenElement);
+    const onChange = () =>
+      setIsFullscreen(!!(document.fullscreenElement || (document as any).webkitFullscreenElement));
     document.addEventListener('fullscreenchange', onChange);
-    return () => document.removeEventListener('fullscreenchange', onChange);
+    document.addEventListener('webkitfullscreenchange', onChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', onChange);
+      document.removeEventListener('webkitfullscreenchange', onChange);
+    };
+  }, []);
+
+  // ── Screen wake lock — keep display on while video plays ─────────────────────
+  const wakeLockRef = useRef<any>(null);
+  useEffect(() => {
+    if (!('wakeLock' in navigator)) return;
+    if (!paused) {
+      (navigator as any).wakeLock.request('screen')
+        .then((wl: any) => { wakeLockRef.current = wl; })
+        .catch(() => {});
+    } else {
+      wakeLockRef.current?.release().catch(() => {});
+      wakeLockRef.current = null;
+    }
+    return () => { wakeLockRef.current?.release().catch(() => {}); wakeLockRef.current = null; };
+  }, [paused]);
+
+  // ── Auto-fullscreen on landscape rotation (Android UX) ───────────────────────
+  const autoFsRef = useRef(false);
+  useEffect(() => {
+    const so = screen.orientation as any;
+    if (!so?.addEventListener) return;
+    const onOrientationChange = async () => {
+      const isLandscape = so.type?.includes('landscape') || so.angle === 90 || so.angle === 270;
+      const fsEl = document.fullscreenElement || (document as any).webkitFullscreenElement;
+      const el = containerRef.current;
+      // Only auto-enter fullscreen on rotation if the video itself is landscape
+      if (isLandscape && !fsEl && el && videoIsLandscapeRef.current) {
+        try {
+          if (el.requestFullscreen) await el.requestFullscreen();
+          else if ((el as any).webkitRequestFullscreen) (el as any).webkitRequestFullscreen();
+          autoFsRef.current = true;
+        } catch {}
+      } else if (!isLandscape && autoFsRef.current) {
+        try {
+          if (document.exitFullscreen) await document.exitFullscreen();
+          else if ((document as any).webkitExitFullscreen) (document as any).webkitExitFullscreen();
+        } catch {}
+        autoFsRef.current = false;
+      }
+    };
+    so.addEventListener('change', onOrientationChange);
+    return () => so.removeEventListener('change', onOrientationChange);
   }, []);
 
   // ── Video event listeners ─────────────────────────────────────────────────────
@@ -89,6 +138,7 @@ export function Player() {
 
     const onMeta = () => {
       setDuration(v.duration);
+      videoIsLandscapeRef.current = v.videoWidth >= v.videoHeight;
       if (saved > 5 && saved < v.duration - 3) v.currentTime = saved;
     };
     const onTime = () => {
@@ -174,10 +224,21 @@ export function Player() {
   }, []);
 
   const toggleFullscreen = useCallback(async () => {
-    if (!containerRef.current) return;
-    document.fullscreenElement
-      ? await document.exitFullscreen()
-      : await containerRef.current.requestFullscreen();
+    const el = containerRef.current;
+    if (!el) return;
+    const fsEl = document.fullscreenElement || (document as any).webkitFullscreenElement;
+    if (fsEl) {
+      if (document.exitFullscreen) await document.exitFullscreen();
+      else if ((document as any).webkitExitFullscreen) (document as any).webkitExitFullscreen();
+      try { (screen.orientation as any)?.unlock?.(); } catch {}
+      autoFsRef.current = false;
+    } else {
+      if (el.requestFullscreen) await el.requestFullscreen();
+      else if ((el as any).webkitRequestFullscreen) (el as any).webkitRequestFullscreen();
+      // Lock to the orientation that matches the video — landscape for wide videos, portrait for tall
+      const targetOrientation = videoIsLandscapeRef.current ? 'landscape' : 'portrait';
+      try { await (screen.orientation as any)?.lock?.(targetOrientation); } catch {}
+    }
   }, []);
 
   const togglePiP = useCallback(async () => {
@@ -187,7 +248,7 @@ export function Player() {
       : v.requestPictureInPicture?.();
   }, []);
 
-  // ── Seek bar drag ─────────────────────────────────────────────────────────────
+  // ── Seek bar drag (mouse) ─────────────────────────────────────────────────────
   const getFrac = useCallback((e: MouseEvent | React.MouseEvent, bar: HTMLDivElement) => {
     const r = bar.getBoundingClientRect();
     return Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
@@ -204,10 +265,36 @@ export function Player() {
     if (!seeking) return;
     const onMove = (e: MouseEvent) => { if (seekBarRef.current) seekTo(getFrac(e, seekBarRef.current)); };
     const onUp = () => { setSeeking(false); seekingRef.current = false; };
+    const onTouchMove = (e: TouchEvent) => {
+      if (!seekBarRef.current) return;
+      const touch = e.touches[0];
+      const r = seekBarRef.current.getBoundingClientRect();
+      seekTo(Math.max(0, Math.min(1, (touch.clientX - r.left) / r.width)));
+    };
+    const onTouchEnd = () => { setSeeking(false); seekingRef.current = false; };
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
-    return () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+    document.addEventListener('touchmove', onTouchMove, { passive: true });
+    document.addEventListener('touchend', onTouchEnd);
+    return () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.removeEventListener('touchmove', onTouchMove);
+      document.removeEventListener('touchend', onTouchEnd);
+    };
   }, [seeking, getFrac, seekTo]);
+
+  // ── Seek bar touch start ──────────────────────────────────────────────────────
+  const onSeekTouchStart = useCallback((e: React.TouchEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    seekingRef.current = true;
+    setSeeking(true);
+    if (seekBarRef.current) {
+      const touch = e.touches[0];
+      const r = seekBarRef.current.getBoundingClientRect();
+      seekTo(Math.max(0, Math.min(1, (touch.clientX - r.left) / r.width)));
+    }
+  }, [seekTo]);
 
   // ── Volume bar drag ───────────────────────────────────────────────────────────
   const onVolDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -269,13 +356,43 @@ export function Player() {
 
   const VolumeIcon = muted || volume === 0 ? VolumeX : volume < 0.5 ? Volume1 : Volume2;
 
-  // ── Touch: swipe-down to close ────────────────────────────────────────────────
-  const touchY = useRef<number | null>(null);
-  const onTouchStart = (e: React.TouchEvent) => { touchY.current = e.touches[0].clientY; };
+  // ── Touch: swipe-down to close + double-tap to seek ───────────────────────────
+  const touchStart = useRef<{ x: number; y: number } | null>(null);
+  const lastTap = useRef<{ side: 'left' | 'right' | 'center'; time: number } | null>(null);
+
+  const onTouchStart = (e: React.TouchEvent) => {
+    touchStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  };
+
   const onTouchEnd = (e: React.TouchEvent) => {
-    if (touchY.current === null) return;
-    if (e.changedTouches[0].clientY - touchY.current > 90) close();
-    touchY.current = null;
+    if (!touchStart.current) return;
+    const dy = e.changedTouches[0].clientY - touchStart.current.y;
+    const dx = e.changedTouches[0].clientX - touchStart.current.x;
+    touchStart.current = null;
+
+    // Swipe down to close
+    if (dy > 90 && Math.abs(dx) < 60) { close(); return; }
+
+    // Tap (minimal movement) — handle double-tap seek
+    if (Math.abs(dx) < 25 && Math.abs(dy) < 25) {
+      const touch = e.changedTouches[0];
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const x = (touch.clientX - rect.left) / rect.width;
+      const side: 'left' | 'right' | 'center' = x < 0.33 ? 'left' : x > 0.67 ? 'right' : 'center';
+      const now = Date.now();
+
+      if (lastTap.current && now - lastTap.current.time < 300 && lastTap.current.side === side) {
+        // Double tap
+        if (side === 'left') seekBy(-SEEK_STEP);
+        else if (side === 'right') seekBy(SEEK_STEP);
+        else togglePlay();
+        lastTap.current = null;
+      } else {
+        lastTap.current = { side, time: now };
+        revealControls();
+      }
+    }
   };
 
   if (!video) return null;
@@ -316,10 +433,13 @@ export function Player() {
       )}
 
       {/* ── Top bar ──────────────────────────────────────────────────────────────── */}
-      <div className={cn(
-        'absolute inset-x-0 top-0 z-10 flex items-center gap-3 px-4 py-3 bg-gradient-to-b from-black/80 via-black/30 to-transparent transition-opacity duration-300',
-        controlsVisible ? 'opacity-100' : 'opacity-0 pointer-events-none',
-      )}>
+      <div
+        className={cn(
+          'absolute inset-x-0 top-0 z-10 flex items-center gap-3 bg-gradient-to-b from-black/80 via-black/30 to-transparent transition-opacity duration-300',
+          controlsVisible ? 'opacity-100' : 'opacity-0 pointer-events-none',
+        )}
+        style={{ padding: 'max(env(safe-area-inset-top, 0px), 12px) 16px 12px' }}
+      >
         <button
           onClick={close}
           className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/25 active:scale-95 transition-all backdrop-blur-sm"
@@ -365,10 +485,13 @@ export function Player() {
       </div>
 
       {/* ── Bottom controls ───────────────────────────────────────────────────────── */}
-      <div className={cn(
-        'absolute inset-x-0 bottom-0 z-10 flex flex-col gap-3 px-4 pb-5 pt-16 bg-gradient-to-t from-black/85 via-black/40 to-transparent transition-opacity duration-300',
-        controlsVisible ? 'opacity-100' : 'opacity-0 pointer-events-none',
-      )}>
+      <div
+        className={cn(
+          'absolute inset-x-0 bottom-0 z-10 flex flex-col gap-3 pt-16 bg-gradient-to-t from-black/85 via-black/40 to-transparent transition-opacity duration-300',
+          controlsVisible ? 'opacity-100' : 'opacity-0 pointer-events-none',
+        )}
+        style={{ padding: '4rem 16px max(env(safe-area-inset-bottom, 0px), 20px)' }}
+      >
 
         {/* Seek bar */}
         <div className="relative px-1">
@@ -401,15 +524,16 @@ export function Player() {
             </div>
           )}
 
-          {/* Track */}
+          {/* Track — taller on mobile for easier touch */}
           <div
             ref={seekBarRef}
             role="slider"
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={Math.round(progress * 100)}
-            className="group relative h-1.5 cursor-pointer rounded-full bg-white/20 hover:h-2.5 transition-all duration-150"
+            className="group relative h-2.5 cursor-pointer rounded-full bg-white/20 sm:h-1.5 sm:hover:h-2.5 transition-all duration-150"
             onMouseDown={onSeekDown}
+            onTouchStart={onSeekTouchStart}
             onMouseMove={e => {
               const bar = seekBarRef.current; if (!bar) return;
               const r = bar.getBoundingClientRect();
@@ -429,7 +553,7 @@ export function Player() {
             />
             {/* Thumb */}
             <div
-              className="absolute top-1/2 h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow-xl opacity-0 group-hover:opacity-100 transition-opacity"
+              className="absolute top-1/2 h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow-xl opacity-0 group-hover:opacity-100 sm:transition-opacity"
               style={{ left: `${progress * 100}%` }}
             />
           </div>
@@ -485,8 +609,8 @@ export function Player() {
             {speed === 1 ? '1×' : `${speed}×`}
           </button>
 
-          {/* Volume */}
-          <div className="group/vol flex items-center gap-1.5">
+          {/* Volume — hidden on mobile (use device hardware buttons) */}
+          <div className="group/vol hidden sm:flex items-center gap-1.5">
             <button
               onClick={toggleMute}
               className="flex h-9 w-9 items-center justify-center rounded-full text-white hover:bg-white/10 transition-all"
@@ -510,28 +634,44 @@ export function Player() {
             </div>
           </div>
 
+          {/* Mute icon — mobile only (no slider, just toggle) */}
+          <button
+            onClick={toggleMute}
+            className="flex h-9 w-9 items-center justify-center rounded-full text-white hover:bg-white/10 transition-all sm:hidden"
+            title="Mute"
+          >
+            <VolumeIcon className="h-5 w-5" />
+          </button>
+
           {/* PiP */}
           <button
             onClick={togglePiP}
-            className="flex h-9 w-9 items-center justify-center rounded-full text-white hover:bg-white/10 transition-all"
+            className="hidden sm:flex h-9 w-9 items-center justify-center rounded-full text-white hover:bg-white/10 transition-all"
             title="Picture in Picture  (P)"
           >
             <PictureInPicture2 className="h-5 w-5" />
           </button>
 
-          {/* Fullscreen */}
+          {/* Fullscreen — larger tap target on mobile */}
           <button
             onClick={toggleFullscreen}
-            className="flex h-9 w-9 items-center justify-center rounded-full text-white hover:bg-white/10 transition-all"
+            className="flex h-11 w-11 items-center justify-center rounded-full text-white hover:bg-white/10 active:scale-90 transition-all sm:h-9 sm:w-9"
             title="Fullscreen  (F)"
           >
-            {isFullscreen ? <Minimize className="h-5 w-5" /> : <Maximize className="h-5 w-5" />}
+            {isFullscreen
+              ? <Minimize className="h-6 w-6 sm:h-5 sm:w-5" />
+              : <Maximize className="h-6 w-6 sm:h-5 sm:w-5" />}
           </button>
         </div>
 
-        {/* Keyboard hint bar */}
+        {/* Keyboard hint bar — desktop only */}
         <p className="hidden sm:block text-center text-[10px] text-white/20 -mt-1">
           Space/K · J/L ±10s · ↑↓ volume · M mute · F fullscreen · 0–9 seek% · N/B playlist · Esc close
+        </p>
+
+        {/* Mobile touch hint — shown briefly then fades */}
+        <p className="block sm:hidden text-center text-[10px] text-white/20 -mt-1">
+          Double-tap left/right to seek · Swipe down to close
         </p>
       </div>
     </div>

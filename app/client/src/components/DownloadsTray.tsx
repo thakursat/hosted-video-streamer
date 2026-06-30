@@ -190,7 +190,7 @@ export function DownloadsTray({ onOpenModal }: DownloadsTrayProps) {
   return (
     <div
       className={cn(
-        'fixed bottom-4 right-4 z-40 w-80 overflow-hidden rounded-2xl border border-border bg-surface/95 shadow-2xl backdrop-blur-md',
+        'fixed bottom-20 right-4 z-40 w-80 overflow-hidden rounded-2xl border border-border bg-surface/95 shadow-2xl backdrop-blur-md lg:bottom-4',
         'animate-in slide-in-from-bottom-4 fade-in duration-200',
       )}
     >
