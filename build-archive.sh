@@ -26,11 +26,13 @@ tar -czf "$OUT" \
   --exclude='./config.json' \
   --exclude='./secrets.json' \
   --exclude='./meta-cache.json' \
+  --exclude='./download-queue.json' \
   --exclude='./server.log' \
   --exclude='./cookies.txt' \
   --exclude='./yt-dlp' \
   --exclude='./thumbnails' \
   --exclude='./media' \
+  --exclude='./*.mp4' \
   -C "$SRC" .
 
 echo "Wrote $OUT ($(du -h "$OUT" | cut -f1))"
