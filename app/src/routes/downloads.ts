@@ -5,7 +5,7 @@ import crypto from 'crypto';
 import type { Response } from 'express';
 import { requireAuth } from '../middleware/auth';
 import { rescan, safePath, getMediaRoot, buildMeta } from '../services/library';
-import { ytNetArgs, ytSpeedArgs, spawnDownload, fetchMeta, netHint, normalizeUrl } from '../services/ytdlp';
+import { ytNetArgs, ytSpeedArgs, ytFilterArgs, isFilteredOut, spawnDownload, fetchMeta, netHint, normalizeUrl } from '../services/ytdlp';
 import { fetchCookiesViaBrowser } from '../services/browserCookies';
 import type { DownloadJob } from '../types';
 
@@ -95,6 +95,8 @@ function startJob(job: InternalJob): void {
 
   let retried = false;
 
+  let filtered = false;
+
   function spawnProc(): void {
     const archivePath = path.join(job._destAbs, '.downloaded.txt');
     const outTpl = job._rawFilename
@@ -106,6 +108,7 @@ function startJob(job: InternalJob): void {
       '--download-archive', archivePath,
       ...ytNetArgs(),
       ...ytSpeedArgs(),
+      ...ytFilterArgs(),  // skip videos shorter than 10 minutes
       '--no-playlist',
       '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best',
       '--merge-output-format', 'mp4',
@@ -119,6 +122,7 @@ function startJob(job: InternalJob): void {
     proc.stdout.on('data', (chunk: Buffer) => {
       for (const line of chunk.toString().split('\n')) {
         if (!line.trim()) continue;
+        if (isFilteredOut(line)) filtered = true;
         const pctM = line.match(/(\d+\.?\d*)%/);
         if (pctM) job.progress = parseFloat(pctM[1]);
         const speedM = line.match(/at\s+([\d.]+\w+\/s)/);
@@ -132,6 +136,7 @@ function startJob(job: InternalJob): void {
 
     proc.stderr.on('data', (chunk: Buffer) => {
       const text = chunk.toString();
+      if (isFilteredOut(text)) filtered = true;
       if (text.includes('ERROR') || text.includes('error'))
         job.error = netHint(text.trim().split('\n')[0]);
     });
@@ -159,7 +164,13 @@ function startJob(job: InternalJob): void {
         return;
       }
 
-      if (code === 0) {
+      if (code === 0 && filtered) {
+        // yt-dlp fetched metadata and skipped it (under 10 minutes) — nothing
+        // was downloaded, so surface a clear reason instead of "done".
+        job.status = 'error';
+        job.error = 'Skipped — video is shorter than 10 minutes';
+        finishJob(id);
+      } else if (code === 0) {
         job.status = 'done';
         job.progress = 100;
         finishJob(id);

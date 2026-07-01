@@ -47,6 +47,21 @@ export function ytSpeedArgs(): string[] {
   return ['--concurrent-fragments', '4', '--http-chunk-size', '10M'];
 }
 
+// Minimum video length to download. Anything shorter is skipped by yt-dlp
+// (it reads duration from metadata first and never downloads the media).
+export const MIN_DURATION_SEC = 600; // 10 minutes
+
+// yt-dlp filter that rejects videos under MIN_DURATION_SEC. A rejected video
+// makes yt-dlp print "does not pass filter" and exit 0 without downloading.
+export function ytFilterArgs(): string[] {
+  return ['--match-filter', `duration >= ${MIN_DURATION_SEC}`];
+}
+
+// True if a yt-dlp output line indicates the video was skipped by the filter.
+export function isFilteredOut(line: string): boolean {
+  return /does not pass filter/i.test(line);
+}
+
 function decodeHtml(s: string): string {
   return String(s || '')
     .replace(/&#(\d+);/g, (_, n: string) => String.fromCharCode(Number(n)))

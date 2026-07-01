@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Play, Pause, SkipBack, SkipForward, ChevronLeft,
   Volume2, Volume1, VolumeX, Maximize, Minimize,
-  PictureInPicture2, Gauge, Loader2, Trash2,
+  PictureInPicture2, Loader2, Trash2,
 } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -10,7 +10,6 @@ import { usePlayerStore } from '@/stores/playerStore';
 import { videosApi } from '@/api/videos';
 import { formatDuration, cn } from '@/lib/utils';
 
-const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 const SEEK_STEP = 10;
 const CONTROLS_TIMEOUT = 3000;
 
@@ -39,7 +38,6 @@ export function Player() {
   const [bufferedEnd, setBufferedEnd] = useState(0);
   const [volume, setVolumeState] = useState(1);
   const [muted, setMuted] = useState(false);
-  const [speed, setSpeed] = useState(1);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   // UI state
@@ -146,7 +144,6 @@ export function Player() {
     const onPlay = () => { setPaused(false); revealControls(); };
     const onPause = () => { setPaused(true); setControlsVisible(true); clearTimeout(hideTimer.current); };
     const onVol = () => { setVolumeState(v.volume); setMuted(v.muted); };
-    const onRate = () => setSpeed(v.playbackRate);
     const onEnded = () => {
       setPaused(true);
       setControlsVisible(true);
@@ -161,7 +158,6 @@ export function Player() {
     v.addEventListener('play', onPlay);
     v.addEventListener('pause', onPause);
     v.addEventListener('volumechange', onVol);
-    v.addEventListener('ratechange', onRate);
     v.addEventListener('ended', onEnded);
     v.addEventListener('waiting', onWaiting);
     v.addEventListener('stalled', onWaiting);
@@ -174,7 +170,6 @@ export function Player() {
       v.removeEventListener('play', onPlay);
       v.removeEventListener('pause', onPause);
       v.removeEventListener('volumechange', onVol);
-      v.removeEventListener('ratechange', onRate);
       v.removeEventListener('ended', onEnded);
       v.removeEventListener('waiting', onWaiting);
       v.removeEventListener('stalled', onWaiting);
@@ -214,12 +209,6 @@ export function Player() {
     const v = videoRef.current; if (!v) return;
     if (v.muted) { v.muted = false; if (v.volume < 0.05) v.volume = 0.5; }
     else v.muted = true;
-  }, []);
-
-  const cycleSpeed = useCallback(() => {
-    const v = videoRef.current; if (!v) return;
-    const i = SPEEDS.indexOf(v.playbackRate);
-    v.playbackRate = SPEEDS[(i + 1) % SPEEDS.length];
   }, []);
 
   const toggleFullscreen = useCallback(async () => {
@@ -346,14 +335,6 @@ export function Player() {
         case 'm': case 'M': toggleMute(); break;
         case 'f': case 'F': toggleFullscreen(); break;
         case 'p': case 'P': togglePiP(); break;
-        case '<': case ',': {
-          const v = videoRef.current; if (!v) break;
-          const i = SPEEDS.indexOf(v.playbackRate); if (i > 0) v.playbackRate = SPEEDS[i - 1]; break;
-        }
-        case '>': case '.': {
-          const v = videoRef.current; if (!v) break;
-          const i = SPEEDS.indexOf(v.playbackRate); if (i < SPEEDS.length - 1) v.playbackRate = SPEEDS[i + 1]; break;
-        }
         case 'Escape': close(); break;
         case 'n': case 'N': if (hasNext) next(); break;
         case 'b': case 'B': if (hasPrev) prev(); break;
@@ -666,16 +647,6 @@ export function Player() {
           </span>
 
           <div className="flex-1" />
-
-          {/* Speed */}
-          <button
-            onClick={cycleSpeed}
-            className="flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 text-sm font-bold text-white hover:bg-white/20 transition-all"
-            title="Cycle speed  (< / >)"
-          >
-            <Gauge className="h-4 w-4" />
-            {speed === 1 ? '1×' : `${speed}×`}
-          </button>
 
           {/* Volume — hidden on mobile (use device hardware buttons) */}
           <div className="group/vol hidden sm:flex items-center gap-1.5">

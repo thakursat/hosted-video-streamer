@@ -5,7 +5,7 @@ import crypto from 'crypto';
 import type { Response } from 'express';
 import { requireAuth } from '../middleware/auth';
 import { rescan, safePath, getMediaRoot, buildMeta } from '../services/library';
-import { ytNetArgs, ytSpeedArgs, spawnDownload, fetchPlaylistEntries, netHint, normalizeUrl } from '../services/ytdlp';
+import { ytNetArgs, ytSpeedArgs, ytFilterArgs, isFilteredOut, spawnDownload, fetchPlaylistEntries, netHint, normalizeUrl } from '../services/ytdlp';
 import type { BatchJob, BatchItem } from '../types';
 
 const router = Router();
@@ -100,6 +100,7 @@ async function runBatch(b: BatchJob): Promise<void> {
         '--download-archive', b.archive,
         ...ytNetArgs(),
         ...ytSpeedArgs(),
+        ...ytFilterArgs(),  // skip videos shorter than 10 minutes
         isDirectUrl ? '--no-playlist' : '--yes-playlist',
         ...(isDirectUrl ? [] : ['--playlist-items', String(item.index)]),
         '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best',
@@ -108,6 +109,7 @@ async function runBatch(b: BatchJob): Promise<void> {
         isDirectUrl ? item.url! : b.url,
       ];
 
+      let filtered = false;
       await new Promise<void>(resolve => {
         const proc = spawnDownload(args);
         b._procs!.set(item.index, proc);
@@ -115,6 +117,7 @@ async function runBatch(b: BatchJob): Promise<void> {
         proc.stdout.on('data', (chunk: Buffer) => {
           for (const line of chunk.toString().split('\n')) {
             if (!line.trim()) continue;
+            if (isFilteredOut(line)) filtered = true;
             const pct = line.match(/(\d+\.?\d*)%/);
             if (pct) item.progress = parseFloat(pct[1]);
             const spd = line.match(/at\s+([\d.]+\s*\w+\/s)/);
@@ -127,6 +130,7 @@ async function runBatch(b: BatchJob): Promise<void> {
 
         proc.stderr.on('data', (chunk: Buffer) => {
           const text = chunk.toString();
+          if (isFilteredOut(text)) filtered = true;
           const errLine = text.trim().split('\n').find(l => /ERROR/i.test(l));
           if (errLine) item.error = netHint(errLine);
         });
@@ -134,10 +138,15 @@ async function runBatch(b: BatchJob): Promise<void> {
         proc.on('close', (code) => {
           b._procs!.delete(item.index);
           if (item.status !== 'skipped') {
-            const ok = code === 0 && !item.error;
-            item.status = ok ? 'done' : 'error';
-            if (!ok && !item.error) item.error = `yt-dlp exited with code ${code}`;
-            if (ok) item.progress = 100;
+            if (filtered) {
+              item.status = 'error';
+              item.error = 'Skipped — shorter than 10 minutes';
+            } else {
+              const ok = code === 0 && !item.error;
+              item.status = ok ? 'done' : 'error';
+              if (!ok && !item.error) item.error = `yt-dlp exited with code ${code}`;
+              if (ok) item.progress = 100;
+            }
           }
           delete item.speed; delete item.eta;
           b.done = b.items.filter(i => i.status === 'done').length;
