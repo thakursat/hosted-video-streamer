@@ -334,29 +334,26 @@ export function AddVideosModal({ open, onClose, currentFolder }: AddVideosModalP
       return downloadsApi.start(url, folder, filename.trim() || undefined);
     },
     onSuccess: (data: any) => {
-      if ('id' in data) {
-        if (isPlaylist && probe) {
-          const destFolder = createSubfolder && subfolderName.trim()
-            ? (folder ? `${folder}/${subfolderName.trim()}` : subfolderName.trim())
-            : folder;
-          const items = probe.entries
-            .filter(e => selected.has(e.index))
-            .map(e => ({
-              index: e.index, title: e.title,
-              url: e.url, thumbnail: e.thumbnail,
-              status: 'pending' as const, progress: 0,
-            }));
-          addBatch({
-            id: data.id, title: probe.title, status: 'running',
-            paused: false, done: 0, total: items.length, concurrency, items,
-          });
-          qc.invalidateQueries({ queryKey: ['tree'] });
-        } else {
+      if (data?.jobs) {
+        // Playlist: each entry is now an individual job in the central queue.
+        const destFolder = createSubfolder && subfolderName.trim()
+          ? (folder ? `${folder}/${subfolderName.trim()}` : subfolderName.trim())
+          : folder;
+        for (const j of data.jobs as { id: string; url: string }[]) {
           addJob({
-            id: data.id, url, title: 'Fetching info…',
-            status: 'queued', progress: 0, folder, startedAt: Date.now(),
+            id: j.id, url: j.url, title: 'Fetching info…',
+            status: 'queued', progress: 0, folder: destFolder, startedAt: Date.now(),
           });
         }
+        if (data.duplicates) toast.info(`${data.duplicates} already in the queue — skipped`);
+        qc.invalidateQueries({ queryKey: ['tree'] });
+        setUrl(''); setProbe(null); setFilename('');
+        qc.invalidateQueries({ queryKey: ['videos'] });
+      } else if (data?.id) {
+        addJob({
+          id: data.id, url, title: 'Fetching info…',
+          status: 'queued', progress: 0, folder, startedAt: Date.now(),
+        });
         setUrl(''); setProbe(null); setFilename('');
         qc.invalidateQueries({ queryKey: ['videos'] });
       }

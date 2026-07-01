@@ -6,6 +6,7 @@ import type { Response } from 'express';
 import { requireAuth } from '../middleware/auth';
 import { rescan, safePath, getMediaRoot, buildMeta } from '../services/library';
 import { ytNetArgs, ytSpeedArgs, ytFilterArgs, isFilteredOut, spawnDownload, fetchPlaylistEntries, netHint, normalizeUrl } from '../services/ytdlp';
+import { downloadQueue } from '../services/download';
 import type { BatchJob, BatchItem } from '../types';
 
 const router = Router();
@@ -182,43 +183,27 @@ router.post('/playlist/probe', requireAuth, async (req, res) => {
   }
 });
 
+// Playlist download = bulk-enqueue every selected entry into the SAME central
+// queue as single downloads, so the whole app still processes one at a time.
 router.post('/playlist/download', requireAuth, (req, res) => {
-  const url = normalizeUrl(String(req.body?.url || '').trim());
   const folder = String(req.body?.folder || '').replace(/^[/\\]+/, '');
-  const title = String(req.body?.title || 'Playlist');
-  const concurrency = Math.min(
-    Math.max(1, parseInt(String(req.body?.concurrency ?? DEFAULT_CONCURRENCY), 10) || DEFAULT_CONCURRENCY),
-    MAX_CONCURRENCY,
-  );
   const rawItems: { index: number; title: string; url?: string; thumbnail?: string }[] =
     req.body?.items || [];
-
-  if (!url || !rawItems.length) {
-    res.status(400).json({ error: 'url and items required' }); return;
-  }
+  if (!rawItems.length) { res.status(400).json({ error: 'items required' }); return; }
 
   const destAbs = folder ? (safePath(folder) || getMediaRoot()) : getMediaRoot();
   fs.mkdirSync(destAbs, { recursive: true });
 
-  const id = crypto.randomBytes(8).toString('hex');
-  const archive = path.join(destAbs, '.downloaded.txt');
+  const inputs = rawItems
+    .filter(i => i.url)
+    .map(i => ({ url: String(i.url), folder, destAbs }));
+  if (!inputs.length) { res.status(400).json({ error: 'No downloadable items in playlist' }); return; }
 
-  const items: BatchItem[] = rawItems.map(i => ({
-    index: i.index, title: i.title,
-    url: i.url, thumbnail: i.thumbnail,
-    status: 'pending', progress: 0,
-  }));
-
-  const batch: BatchJob = {
-    id, url, title, folder, items,
-    done: 0, total: items.length,
-    status: 'running', paused: false,
-    concurrency, startedAt: Date.now(), archive,
-    _subs: new Set(),
-  };
-  batches.set(id, batch);
-  res.json({ id });
-  runBatch(batch);
+  const { added, duplicates } = downloadQueue.enqueueMany(inputs);
+  res.json({
+    jobs: added.map(i => ({ id: i.id, url: i.url, folder: i.folder })),
+    duplicates,
+  });
 });
 
 router.get('/batch/:id/events', requireAuth, (req, res) => {

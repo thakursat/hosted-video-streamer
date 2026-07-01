@@ -6,6 +6,7 @@ app/client/dist/
 app/config.json
 app/secrets.json
 app/meta-cache.json
+app/download-queue.json
 app/server.log
 app/cookies.txt
 app/yt-dlp

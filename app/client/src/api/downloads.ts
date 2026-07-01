@@ -13,18 +13,23 @@ export const downloadsApi = {
 
   cancel: (id: string) => api.post(`/download/${id}/cancel`).then(r => r.data),
 
+  retry: (id: string) => api.post(`/download/${id}/retry`).then(r => r.data),
+
   dismiss: (id: string) => api.post(`/download/${id}/dismiss`).then(r => r.data),
 
   probePlaylist: (url: string) =>
     api.post<PlaylistProbe>('/playlist/probe', { url }).then(r => r.data),
 
+  // Bulk-enqueues playlist entries into the central queue; returns one job per entry.
   startBatch: (payload: {
     url: string;
     folder: string;
     title: string;
     concurrency?: number;
     items: { index: number; title: string; url?: string; thumbnail?: string }[];
-  }) => api.post<{ id: string }>('/playlist/download', payload).then(r => r.data),
+  }) => api.post<{ jobs: { id: string; url: string; folder: string }[]; duplicates: number }>(
+    '/playlist/download', payload,
+  ).then(r => r.data),
 
   listBatches: () => api.get<BatchJob[]>('/batches').then(r => r.data),
 

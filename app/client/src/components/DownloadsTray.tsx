@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Download, ChevronUp, ChevronDown, X, ListVideo, CheckCircle2, AlertCircle, Pause, Play } from 'lucide-react';
+import { Download, ChevronUp, ChevronDown, X, ListVideo, CheckCircle2, AlertCircle, Pause, Play, RotateCw } from 'lucide-react';
 import { useDownloadsStore } from '@/stores/downloadsStore';
 import { downloadsApi } from '@/api/downloads';
 import { useSSE } from '@/hooks/useSSE';
@@ -31,6 +31,11 @@ function TrayJobRow({ jobId, onOpenModal }: { jobId: string; onOpenModal: () => 
   const handlePause   = () => downloadsApi.pause(job.id).catch(() => {});
   const handleResume  = () => downloadsApi.resume(job.id).catch(() => {});
   const handleCancel  = () => downloadsApi.cancel(job.id).catch(() => {});
+  // Re-enqueue the same task; flip local status so the SSE subscription re-opens.
+  const handleRetry   = () => {
+    downloadsApi.retry(job.id).catch(() => {});
+    updateJob(job.id, { status: 'queued', error: undefined, progress: 0, queuePos: undefined });
+  };
 
   return (
     <div className="flex items-center gap-2.5 px-3 py-2.5 hover:bg-elevated/60 transition-colors">
@@ -91,9 +96,14 @@ function TrayJobRow({ jobId, onOpenModal }: { jobId: string; onOpenModal: () => 
           </button>
         )}
         {isError && (
-          <button onClick={dismiss} className="rounded-full p-1 text-danger hover:bg-danger/10 transition-colors" title="Dismiss">
-            <AlertCircle className="h-3.5 w-3.5" />
-          </button>
+          <>
+            <button onClick={handleRetry} title="Retry" className="rounded-full p-1 text-text-muted hover:text-accent hover:bg-accent/10 transition-colors">
+              <RotateCw className="h-3.5 w-3.5" />
+            </button>
+            <button onClick={dismiss} className="rounded-full p-1 text-danger hover:bg-danger/10 transition-colors" title="Dismiss">
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </>
         )}
       </div>
     </div>
