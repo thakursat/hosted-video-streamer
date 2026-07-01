@@ -52,12 +52,17 @@ app.get('/stream/:id', requireAuth, (req, res) => {
   // already-downloaded bytes instead of re-streaming from disk.
   const lastMod = stat.mtime.toUTCString();
   const range = req.headers.range;
-  // Larger read chunks = fewer syscalls when streaming big files.
-  const HWM = 1 << 20; // 1 MiB
+  const HWM = 1 << 20;                 // 1 MiB read buffer — fewer syscalls
+  const CHUNK = 8 * 1024 * 1024;       // cap for open-ended ranges → progressive streaming
+
+  let stream: fs.ReadStream;
   if (range) {
     const [s, e] = range.replace(/bytes=/, '').split('-');
-    const start = parseInt(s, 10);
-    const end = e ? parseInt(e, 10) : total - 1;
+    const start = parseInt(s, 10) || 0;
+    // Open-ended request (`bytes=0-`, what <video> sends) → return a bounded chunk
+    // so playback starts on the first chunk and the player streams/seeks the rest,
+    // instead of waiting on one huge whole-file response.
+    const end = e ? Math.min(parseInt(e, 10), total - 1) : Math.min(start + CHUNK - 1, total - 1);
     res.writeHead(206, {
       'Content-Range': `bytes ${start}-${end}/${total}`,
       'Accept-Ranges': 'bytes',
@@ -66,7 +71,7 @@ app.get('/stream/:id', requireAuth, (req, res) => {
       'Cache-Control': 'private, max-age=86400',
       'Last-Modified': lastMod,
     });
-    fs.createReadStream(video.absPath, { start, end, highWaterMark: HWM }).pipe(res);
+    stream = fs.createReadStream(video.absPath, { start, end, highWaterMark: HWM });
   } else {
     res.writeHead(200, {
       'Content-Length': total,
@@ -75,8 +80,11 @@ app.get('/stream/:id', requireAuth, (req, res) => {
       'Cache-Control': 'private, max-age=86400',
       'Last-Modified': lastMod,
     });
-    fs.createReadStream(video.absPath, { highWaterMark: HWM }).pipe(res);
+    stream = fs.createReadStream(video.absPath, { highWaterMark: HWM });
   }
+  stream.pipe(res);
+  // Free the file handle if the client seeks away / closes the tab mid-stream.
+  res.on('close', () => stream.destroy());
 });
 
 app.get('/thumb/:id', requireAuth, async (req, res) => {

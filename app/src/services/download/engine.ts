@@ -33,6 +33,9 @@ export class YtDlpEngine implements DownloadEngine {
         '--no-playlist',
         '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best',
         '--merge-output-format', 'mp4',
+        // Move the MP4 index (moov) to the front so the file streams/plays
+        // immediately instead of needing a full download first.
+        '--postprocessor-args', 'ffmpeg:-movflags +faststart',
         '-o', outTpl,
         item.url,
       ];
