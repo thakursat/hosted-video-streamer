@@ -17,6 +17,10 @@ export const downloadsApi = {
 
   dismiss: (id: string) => api.post(`/download/${id}/dismiss`).then(r => r.data),
 
+  reorder: (id: string, index: number) => api.post(`/download/${id}/reorder`, { index }).then(r => r.data),
+
+  clear: () => api.post<{ removed: number }>('/downloads/clear').then(r => r.data),
+
   probePlaylist: (url: string) =>
     api.post<PlaylistProbe>('/playlist/probe', { url }).then(r => r.data),
 

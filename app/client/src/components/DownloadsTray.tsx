@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Download, ChevronUp, ChevronDown, X, ListVideo, CheckCircle2, AlertCircle, Pause, Play, RotateCw } from 'lucide-react';
 import { useDownloadsStore } from '@/stores/downloadsStore';
 import { downloadsApi } from '@/api/downloads';
@@ -172,6 +173,7 @@ interface DownloadsTrayProps {
 export function DownloadsTray({ onOpenModal }: DownloadsTrayProps) {
   const { jobs, batches } = useDownloadsStore();
   const [expanded, setExpanded] = useState(true);
+  const navigate = useNavigate();
 
   if (jobs.length === 0 && batches.length === 0) return null;
 
@@ -242,7 +244,7 @@ export function DownloadsTray({ onOpenModal }: DownloadsTrayProps) {
 
           <div className="border-t border-border px-4 py-2.5">
             <button
-              onClick={onOpenModal}
+              onClick={() => navigate('/downloads')}
               className="w-full rounded-lg py-1 text-xs font-medium text-accent hover:bg-accent/10 transition-colors"
             >
               Manage downloads →

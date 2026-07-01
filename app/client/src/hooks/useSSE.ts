@@ -17,7 +17,7 @@ export function useSSE<T>(
       } catch {}
     };
 
-    ['status', 'progress', 'update', 'error'].forEach(name => {
+    ['status', 'progress', 'update', 'error', 'queue'].forEach(name => {
       es.addEventListener(name, (e) => handle(e as MessageEvent, name));
     });
 

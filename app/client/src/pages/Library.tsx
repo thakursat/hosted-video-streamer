@@ -162,7 +162,7 @@ export function Library() {
     {
       icon: Download,
       label: 'Downloads',
-      onClick: () => setShowAdd(true),
+      onClick: () => navigate('/downloads'),
       badge: activeDownloads,
     },
     {

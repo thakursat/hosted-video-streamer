@@ -5,6 +5,7 @@ import { Loader2 } from 'lucide-react';
 import { Library } from './pages/Library';
 import { Login } from './pages/Login';
 import { Settings } from './pages/Settings';
+import { Downloads } from './pages/Downloads';
 import { authApi } from './api/settings';
 
 // Gate protected routes on the session check so the dashboard never mounts
@@ -35,6 +36,7 @@ export default function App() {
     <Routes>
       <Route path="/" element={<RequireAuth><Library /></RequireAuth>} />
       <Route path="/login" element={<Login />} />
+      <Route path="/downloads" element={<RequireAuth><Downloads /></RequireAuth>} />
       <Route path="/settings" element={<RequireAuth><Settings /></RequireAuth>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

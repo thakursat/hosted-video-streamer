@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { BarChart2, RefreshCw, Settings, LogOut, Plus } from 'lucide-react';
+import { BarChart2, RefreshCw, Settings, LogOut, Plus, Download } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from './ui/button';
 import { settingsApi, authApi } from '@/api/settings';
@@ -99,6 +99,9 @@ export function Header({ onAddVideos, onStats, videoCount, search, onSearch }: H
       <div className="hidden lg:flex items-center gap-1">
         <Button size="default" onClick={onAddVideos}>
           <Plus className="h-4 w-4" /> Add videos
+        </Button>
+        <Button size="icon" variant="ghost" onClick={() => navigate('/downloads')} title="Downloads">
+          <Download className="h-4 w-4" />
         </Button>
         <Button size="icon" variant="ghost" onClick={onStats} title="Server stats">
           <BarChart2 className="h-4 w-4" />
