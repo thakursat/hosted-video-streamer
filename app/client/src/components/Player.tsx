@@ -2,9 +2,12 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Play, Pause, SkipBack, SkipForward, ChevronLeft,
   Volume2, Volume1, VolumeX, Maximize, Minimize,
-  PictureInPicture2, Gauge, Loader2,
+  PictureInPicture2, Gauge, Loader2, Trash2,
 } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { usePlayerStore } from '@/stores/playerStore';
+import { videosApi } from '@/api/videos';
 import { formatDuration, cn } from '@/lib/utils';
 
 const RESUME_KEY = (id: string) => `sv:pos:${id}`;
@@ -13,7 +16,8 @@ const SEEK_STEP = 10;
 const CONTROLS_TIMEOUT = 3000;
 
 export function Player() {
-  const { video, playlist, close, next, prev } = usePlayerStore();
+  const { video, playlist, close, next, prev, removeCurrent } = usePlayerStore();
+  const qc = useQueryClient();
 
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -46,6 +50,8 @@ export function Player() {
   const [seekHoverX, setSeekHoverX] = useState<number | null>(null);
   const [flash, setFlash] = useState<{ delta: number; key: number } | null>(null);
   const [buffering, setBuffering] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const idx = video && playlist.length ? playlist.findIndex(v => v.id === video.id) : -1;
   const hasPrev = idx > 0;
@@ -254,6 +260,23 @@ export function Player() {
       ? await document.exitPictureInPicture()
       : v.requestPictureInPicture?.();
   }, []);
+
+  const doDelete = useCallback(async () => {
+    if (!video) return;
+    setDeleting(true);
+    try {
+      await videosApi.delete([video.id]);
+      toast.success('Video deleted');
+      qc.invalidateQueries({ queryKey: ['videos'] });
+      qc.invalidateQueries({ queryKey: ['tree'] });
+      setConfirmDelete(false);
+      removeCurrent(); // advance to next, or close if it was the last
+    } catch {
+      toast.error('Delete failed');
+    } finally {
+      setDeleting(false);
+    }
+  }, [video, qc, removeCurrent]);
 
   // ── Seek bar drag (mouse) ─────────────────────────────────────────────────────
   const getFrac = useCallback((e: MouseEvent | React.MouseEvent, bar: HTMLDivElement) => {
@@ -481,36 +504,81 @@ export function Player() {
           {video.folder && <p className="truncate text-xs text-white/50">{video.folder}</p>}
         </div>
 
-        {playlist.length > 1 && (
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              onClick={prev}
-              disabled={!hasPrev}
-              className={cn(
-                'flex h-9 w-9 items-center justify-center rounded-full bg-white/10 backdrop-blur-sm transition-all active:scale-95',
-                hasPrev ? 'text-white hover:bg-white/25' : 'text-white/20 cursor-not-allowed',
-              )}
-              aria-label="Previous"
-            >
-              <SkipBack className="h-4 w-4" />
-            </button>
-            <span className="min-w-14 text-center text-xs font-mono tabular-nums text-white/50">
-              {idx + 1} / {playlist.length}
-            </span>
-            <button
-              onClick={next}
-              disabled={!hasNext}
-              className={cn(
-                'flex h-9 w-9 items-center justify-center rounded-full bg-white/10 backdrop-blur-sm transition-all active:scale-95',
-                hasNext ? 'text-white hover:bg-white/25' : 'text-white/20 cursor-not-allowed',
-              )}
-              aria-label="Next"
-            >
-              <SkipForward className="h-4 w-4" />
-            </button>
-          </div>
-        )}
+        <div className="flex items-center gap-2 shrink-0">
+          {playlist.length > 1 && (
+            <>
+              <button
+                onClick={prev}
+                disabled={!hasPrev}
+                className={cn(
+                  'flex h-9 w-9 items-center justify-center rounded-full bg-white/10 backdrop-blur-sm transition-all active:scale-95',
+                  hasPrev ? 'text-white hover:bg-white/25' : 'text-white/20 cursor-not-allowed',
+                )}
+                aria-label="Previous"
+              >
+                <SkipBack className="h-4 w-4" />
+              </button>
+              <span className="min-w-14 text-center text-xs font-mono tabular-nums text-white/50">
+                {idx + 1} / {playlist.length}
+              </span>
+              <button
+                onClick={next}
+                disabled={!hasNext}
+                className={cn(
+                  'flex h-9 w-9 items-center justify-center rounded-full bg-white/10 backdrop-blur-sm transition-all active:scale-95',
+                  hasNext ? 'text-white hover:bg-white/25' : 'text-white/20 cursor-not-allowed',
+                )}
+                aria-label="Next"
+              >
+                <SkipForward className="h-4 w-4" />
+              </button>
+            </>
+          )}
+          {/* Delete current video */}
+          <button
+            onClick={() => setConfirmDelete(true)}
+            className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-white backdrop-blur-sm transition-all hover:bg-danger/80 active:scale-95"
+            aria-label="Delete video"
+            title="Delete video"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+        </div>
       </div>
+
+      {/* ── Delete confirmation (in-player, above all controls) ─────────────────────── */}
+      {confirmDelete && (
+        <div
+          className="absolute inset-0 z-30 flex items-center justify-center bg-black/70 p-6 backdrop-blur-sm"
+          onClick={() => !deleting && setConfirmDelete(false)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl border border-border bg-surface p-5 shadow-2xl"
+            onClick={e => e.stopPropagation()}
+          >
+            <p className="text-base font-semibold text-text-primary">Delete this video?</p>
+            <p className="mt-1 truncate text-sm text-text-muted">{video.name}</p>
+            <p className="mt-2 text-xs text-danger">This permanently deletes the file. Cannot be undone.</p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                onClick={() => setConfirmDelete(false)}
+                disabled={deleting}
+                className="rounded-lg px-4 py-2 text-sm font-medium text-text-primary hover:bg-elevated disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={doDelete}
+                disabled={deleting}
+                className="flex items-center gap-2 rounded-lg bg-danger px-4 py-2 text-sm font-semibold text-white hover:bg-danger/90 disabled:opacity-50"
+              >
+                {deleting && <Loader2 className="h-4 w-4 animate-spin" />}
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Bottom controls ───────────────────────────────────────────────────────── */}
       <div

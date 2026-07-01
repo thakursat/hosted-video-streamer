@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Folder, FolderOpen, ChevronRight, Film, Plus, Pencil, Trash2, Move, X } from 'lucide-react';
+import { Folder, FolderOpen, ChevronRight, Film, Plus, Pencil, Trash2, Move, X, MoreVertical } from 'lucide-react';
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { videosApi } from '@/api/videos';
 import { cn } from '@/lib/utils';
 import type { FolderTree } from '@/types';
@@ -66,41 +67,56 @@ function TreeNode({ node, depth, selected, onSelect, onCreateFolder, onRenameFol
           <span className="shrink-0 text-xs text-text-subtle">{node.totalCount}</span>
         </button>
 
-        {/* Hover actions */}
-        <div className="absolute right-0.5 hidden items-center rounded-md bg-surface group-hover/node:flex">
-          <button
-            onClick={e => { e.stopPropagation(); onCreateFolder(node.path); }}
-            title="New subfolder"
-            className="rounded p-1 text-text-subtle hover:bg-elevated hover:text-text-primary"
-          >
-            <Plus className="h-3 w-3" />
-          </button>
-          {!isRoot && (
-            <>
-              <button
-                onClick={e => { e.stopPropagation(); onRenameFolder(node.path); }}
-                title="Rename"
-                className="rounded p-1 text-text-subtle hover:bg-elevated hover:text-text-primary"
+        {/* Actions menu — always tappable on mobile, hover-reveal on desktop */}
+        <DropdownMenu.Root>
+          <DropdownMenu.Trigger asChild>
+            <button
+              onClick={e => e.stopPropagation()}
+              title="Folder actions"
+              className={cn(
+                'absolute right-1 rounded-md bg-surface/90 p-1 text-text-subtle transition-opacity hover:bg-elevated hover:text-text-primary',
+                'opacity-100 lg:opacity-0 lg:group-hover/node:opacity-100 data-[state=open]:opacity-100',
+              )}
+            >
+              <MoreVertical className="h-3.5 w-3.5" />
+            </button>
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Portal>
+            <DropdownMenu.Content
+              align="end"
+              className="z-[60] min-w-40 overflow-hidden rounded-xl border border-border bg-elevated p-1 shadow-xl shadow-black/40 animate-fade-in"
+            >
+              <DropdownMenu.Item
+                onClick={() => onCreateFolder(node.path)}
+                className="flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-text-primary outline-none transition-colors hover:bg-border"
               >
-                <Pencil className="h-3 w-3" />
-              </button>
-              <button
-                onClick={e => { e.stopPropagation(); onMoveFolder(node.path); }}
-                title="Move"
-                className="rounded p-1 text-text-subtle hover:bg-elevated hover:text-text-primary"
-              >
-                <Move className="h-3 w-3" />
-              </button>
-              <button
-                onClick={e => { e.stopPropagation(); onDeleteFolder(node.path); }}
-                title="Delete"
-                className="rounded p-1 text-text-subtle hover:bg-danger/10 hover:text-danger"
-              >
-                <Trash2 className="h-3 w-3" />
-              </button>
-            </>
-          )}
-        </div>
+                <Plus className="h-3.5 w-3.5" /> New subfolder
+              </DropdownMenu.Item>
+              {!isRoot && (
+                <>
+                  <DropdownMenu.Item
+                    onClick={() => onRenameFolder(node.path)}
+                    className="flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-text-primary outline-none transition-colors hover:bg-border"
+                  >
+                    <Pencil className="h-3.5 w-3.5" /> Rename
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Item
+                    onClick={() => onMoveFolder(node.path)}
+                    className="flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-text-primary outline-none transition-colors hover:bg-border"
+                  >
+                    <Move className="h-3.5 w-3.5" /> Move
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Item
+                    onClick={() => onDeleteFolder(node.path)}
+                    className="flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-danger outline-none transition-colors hover:bg-danger/10"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" /> Delete
+                  </DropdownMenu.Item>
+                </>
+              )}
+            </DropdownMenu.Content>
+          </DropdownMenu.Portal>
+        </DropdownMenu.Root>
       </div>
 
       {open && hasChildren && (
@@ -124,7 +140,16 @@ function TreeContent({
 }: Pick<SidebarProps, 'selected' | 'onSelect' | 'onCreateFolder' | 'onRenameFolder' | 'onDeleteFolder' | 'onMoveFolder'> & { tree: FolderTree | undefined }) {
   return (
     <div className="p-3">
-      <p className="px-2 pb-1 text-xs font-medium uppercase tracking-wider text-text-subtle">Library</p>
+      <div className="flex items-center justify-between px-2 pb-1">
+        <p className="text-xs font-medium uppercase tracking-wider text-text-subtle">Library</p>
+        <button
+          onClick={() => onCreateFolder('')}
+          title="New folder"
+          className="rounded-md p-1 text-text-subtle transition-colors hover:bg-elevated hover:text-text-primary"
+        >
+          <Plus className="h-3.5 w-3.5" />
+        </button>
+      </div>
       {tree ? (
         <TreeNode
           node={tree} depth={0} selected={selected} onSelect={onSelect}
