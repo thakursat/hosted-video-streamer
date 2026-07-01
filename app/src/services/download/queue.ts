@@ -85,7 +85,9 @@ export class DownloadQueue extends EventEmitter {
       url: input.url.trim(),
       folder: input.folder,
       destAbs: input.destAbs,
-      filename: input.filename,
+      // Save with a random filename unless the caller gave an explicit one. The
+      // name is fixed at enqueue so a retry reuses it (yt-dlp --continue works).
+      filename: input.filename || crypto.randomBytes(8).toString('hex'),
       title: 'Fetching info…',
       state: 'queued',
       progress: 0,

@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import type { ChildProcess } from 'child_process';
 import {
   ytNetArgs, ytSpeedArgs, ytFilterArgs, isFilteredOut,
@@ -18,9 +19,10 @@ export class YtDlpEngine implements DownloadEngine {
     const runOnce = (): Promise<EngineResult> => new Promise(resolve => {
       fs.mkdirSync(item.destAbs, { recursive: true });
       const archivePath = path.join(item.destAbs, '.downloaded.txt');
-      const outTpl = item.filename
-        ? path.join(item.destAbs, item.filename + '.%(ext)s')
-        : path.join(item.destAbs, '%(title).200B [%(id)s].%(ext)s');
+      // Files are saved under a random (or explicit) base name; the real title is
+      // still fetched for the UI but never written into the filename.
+      const base = item.filename || crypto.randomBytes(8).toString('hex');
+      const outTpl = path.join(item.destAbs, base + '.%(ext)s');
 
       const args = [
         '--newline', '--no-mtime', '--no-warnings', '--continue',
