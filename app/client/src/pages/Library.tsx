@@ -49,8 +49,9 @@ export function Library() {
 
   const [folder, setFolder] = useState('');
   const [search, setSearch] = useState('');
-  const [sort, setSort] = useState<SortKey>('addedAt');
-  const [shuffleSeed, setShuffleSeed] = useState(1);
+  const [sort, setSort] = useState<SortKey>('random');
+  // Fresh seed each load so the default random order differs every visit.
+  const [shuffleSeed, setShuffleSeed] = useState(() => Math.floor(Math.random() * 1_000_000) + 1);
   const [showAdd, setShowAdd] = useState(false);
   const [showStats, setShowStats] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -159,7 +160,12 @@ export function Library() {
     // Not in the current folder view — fetch it and build a playlist from its folder.
     videosApi.info(watchId)
       .then(v => videosApi.list(v.folder).catch(() => [] as Video[])
-        .then(siblings => openPlayer(v, siblings.length ? siblings : [v])))
+        .then(siblings => {
+          const list = siblings.length ? siblings : [v];
+          // Match the grid: default queue order is random too.
+          if (sort === 'random') list.sort((a, b) => pseudoHash(a.id, shuffleSeed) - pseudoHash(b.id, shuffleSeed));
+          openPlayer(v, list);
+        }))
       .catch(() => navigate('/', { replace: true }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [watchId, videos]);
